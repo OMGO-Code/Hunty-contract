@@ -330,3 +330,37 @@ pub struct VestingRecord {
     /// Vesting duration in seconds.
     pub period_secs: u64,
 }
+
+// ---------------------------------------------------------------------------
+// HuntyCore cross-contract interface (issue #1078)
+// ---------------------------------------------------------------------------
+
+/// Mirror of `hunty-core::types::HuntStatus`.
+///
+/// Variant names, order, and discriminants MUST stay in sync with
+/// `contracts/hunty-core/src/types.rs`. The XDR discriminant is what
+/// Soroban compares across the cross-contract boundary, so any mismatch
+/// causes `try_get_hunt_status` to return an error and `require_hunt_editable`
+/// to conservatively reject the call with `HuntLocked`.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum HuntStatus {
+    Draft = 0,
+    Active = 1,
+    Completed = 2,
+    Cancelled = 3,
+    Paused = 4,
+    EmergencyStopped = 5,
+    Archived = 6,
+}
+
+/// Minimal cross-contract client for HuntyCore.
+///
+/// Only `get_hunt_status` is needed here; the full hunty-core interface lives
+/// in its own crate and is not a compile-time dependency of reward-manager.
+#[soroban_sdk::contractclient(name = "HuntyCoreClient")]
+pub trait HuntyCoreInterface {
+    /// Returns the current status of a hunt.
+    fn get_hunt_status(env: soroban_sdk::Env, hunt_id: u64) -> HuntStatus;
+}
