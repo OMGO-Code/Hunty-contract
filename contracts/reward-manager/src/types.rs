@@ -1,30 +1,19 @@
 use soroban_sdk::{contracttype, Address, BytesN, Vec};
 
-pub use reward_interface:{
+pub use reward_interface::{
     rank_tiers_are_strictly_ascending, resolve_rank_tier_amount, resolve_tier_amount,
     tiers_are_strictly_ascending, RankBasedRewardTier, RankRewardTier, RewardConfig, TierError,
     TimeBasedRewardTier,
 };
 
-/// Maximum number of delegates allowed per reward pool.
-///
-/// The delegate list is stored in ```RewardPoolConfig::delegates``` and is scanned on
-/// every authorized distribution call. Bounding it at a small constant keeps
-/// the cost of that scan bounded and prevents a pool creator from growing the
-/// config entry with an unbounded list.
-///
-/// This is the cap enforced by ```add_delegate``` (```RewardErrorCode::TooManyDelegates```
-/// is returned when it would be exceeded).
-pub const MAX_DELEGATES: u32 = 32;
-
 /// How XLM rewards are calculated from the pool at distribution time.
-#[contracttpe]
+#[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum DistributionMode {
-    /// Fixed amount supplied by the caller (```RewardConfig.xlm_amount```).
+    /// Fixed amount supplied by the caller (`RewardConfig.xlm_amount`).
     Fixed = 0,
-    /// Share of the pool: ```(player_score / total_scores) * pool_balance```.
+    /// Share of the pool: `(player_score / total_scores) * pool_balance`.
     Proportional = 1,
 }
 
@@ -45,10 +34,10 @@ pub struct DistributionProof {
 }
 
 /// Resolution outcome for a manually resolved failed distribution.
-/// 
+///
 /// This enum tracks the final status of distributions that failed during
 /// their initial execution and were later resolved by an administrator.
-/// 
+///
 /// Related to issue #364: stuck-distribution resolution flow.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,7 +74,7 @@ pub struct DistributionStatus {
     pub distributed: bool,
     /// XLM amount distributed (0 if none).
     pub xlm_amount: i128,
-    /// NFT ID if an NFT has been minted.
+    /// NFT ID if an NFT was minted.
     pub nft_id: Option<u64>,
     /// Whether NFT minting failed during distribution (retry available).
     pub nft_mint_failed: bool,
@@ -101,36 +90,35 @@ pub struct DistributionRecord {
 
 /// Configuration for a reward pool, set at creation time.
 ///
-/// ```time_based_tiers``` is an optional list of (max_elapsed_seconds, xlm_amount)
+/// `time_based_tiers` is an optional list of (max_elapsed_seconds, xlm_amount)
 /// pairs that define a conditional reward schedule based on how quickly a
-/// player completes a hunt. ```rank_based_tiers``` is an optional list of exact
+/// player completes a hunt. `rank_based_tiers` is an optional list of exact
 /// one-based completion ranks and their amounts; a matching rank takes
 /// precedence over time and flat rewards. When both lists are empty the pool
 /// behaves exactly as before. Tier lists can be updated after pool creation
-/// and queried via ``get_pool_config```.
+/// and queried via `get_pool_config`.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardPoolConfig {
     /// Address of the hunt creator who owns this pool.
-    /// Anyone may fund the pool (see ``fund_reward_pool``); the creator is the
+    /// Anyone may fund the pool (see `fund_reward_pool`); the creator is the
     /// only address authorized to manage its configuration and to trigger
-    /// ``refund_pool```, which pays out the remaining balance pro rata across
+    /// `refund_pool`, which pays out the remaining balance pro rata across
     /// every address that funded it.
     pub creator: Address,
     /// Addresses allowed to distribute rewards for this pool.
-    /// Only the creator can manage this list. It is bounded to ```MAX_DELEGATES```
-    /// entries to keep the authorization scan bounded (#1078).
+    /// Only the creator can manage this list.
     pub delegates: Vec<Address>,
     /// Minimum XLM amount per distribution. 0 means no minimum enforced.
     pub min_distribution_amount: i128,
     /// Optional time-based reward tiers. When empty, the per-winner amount
-    /// is computed from ``xlm_pool / max_winners`` as before. When populated,
+    /// is computed from `xlm_pool / max_winners` as before. When populated,
     /// the appropriate tier's `xlm_amount` is selected at distribution time
     /// based on the player's (completion_time - registration_time) elapsed.
     pub time_based_tiers: Vec<TimeBasedRewardTier>,
     /// Whether distributions from this pool are temporarily frozen.
-    /// When ``true```, ``distribute_rewards``` and other distribution functions
-    /// will reject calls with ```RewardErrorCode::PoolFrozen```.
+    /// When `true`, `distribute_rewards` and other distribution functions
+    /// will reject calls with `RewardErrorCode::PoolFrozen`.
     pub frozen: bool,
     /// Token address for the reward pool (e.g., XLM, USDC, or other SAC tokens).
     pub token_address: Address,
@@ -143,8 +131,8 @@ pub struct RewardPoolConfig {
     /// Distribution mode (Fixed or Proportional).
     pub distribution_mode: DistributionMode,
     /// Optional vesting period in seconds. When > 0, XLM rewards are not
-    /// transferred immediately at distribution time. Instead, a ``VestingRecord``
-    /// is created and the player must call ``claim_vested`` to receive tokens
+    /// transferred immediately at distribution time. Instead, a `VestingRecord`
+    /// is created and the player must call `claim_vested` to receive tokens
     /// proportionally as time elapses. 0 means vesting is disabled (instant payout).
     pub vesting_period_secs: u64,
     /// Unix timestamp after which claims are no longer allowed (0 = disabled).
@@ -158,7 +146,7 @@ pub struct RewardPoolConfig {
     /// Optional exact-rank reward tiers. A matching frozen completion rank
     /// takes precedence over flat and time-based amounts.
     pub rank_based_tiers: Vec<RankRewardTier>,
-    /// Address that most recently froze this pool, or ``None`` when the pool is
+    /// Address that most recently froze this pool, or `None` when the pool is
     /// not frozen. Tracks whether the current freeze was issued by the pool
     /// creator or the contract admin so that an admin-issued freeze can only be
     /// lifted by the admin (#1077).
@@ -181,8 +169,8 @@ pub struct RewardPoolStatus {
     pub min_distribution_amount: i128,
     /// Whether distributions from this pool are temporarily frozen.
     pub frozen: bool,
-    /// Address that most recently froze this pool, or `@None`` when not frozen.
-    /// See ``RewardPoolConfig::frozen_by`` (#1077).
+    /// Address that most recently froze this pool, or `None` when not frozen.
+    /// See `RewardPoolConfig::frozen_by` (#1077).
     pub frozen_by: Option<Address>,
 }
 
@@ -194,7 +182,7 @@ pub struct PendingNftMint {
     pub player: Address,
     pub nft_contract: Address,
     pub nft_title: soroban_sdk::String,
-    pub nft_description: soroban_sdk:String,
+    pub nft_description: soroban_sdk::String,
     pub nft_image_uri: soroban_sdk::String,
     pub nft_hunt_title: soroban_sdk::String,
     pub nft_rarity: u32,
@@ -222,7 +210,7 @@ pub struct ValidationResult {
 /// Values are explicit and append-only so adding operations does not renumber
 /// records written by older deployments.
 #[contracttype]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum PoolOperation {
     Create = 0,
@@ -238,25 +226,25 @@ pub enum PoolOperation {
     Migrate = 6,
     /// Unused balance was refunded to the pool creator.
     Refund = 7,
-    /// ``update_pool_config``` changed ``min_distribution_amount``` (``amount``` = new value).
+    /// `update_pool_config` changed `min_distribution_amount` (`amount` = new value).
     UpdateMinAmount = 8,
-    /// ``set_pool_target_amount``` changed the funding target (``amount``` = new value).
+    /// `set_pool_target_amount` changed the funding target (`amount` = new value).
     SetTargetAmount = 9,
-    /// ``set_min_distribution_interval``` changed the distribution cooldown.
+    /// `set_min_distribution_interval` changed the distribution cooldown.
     SetDistributionInterval = 10,
-    /// ``set_distribution_mode``` switched between Fixed and Proportional.
+    /// `set_distribution_mode` switched between Fixed and Proportional.
     SetDistributionMode = 11,
-    /// ``set_pool_nft_contract``` set or cleared the pool's NFT contract.
+    /// `set_pool_nft_contract` set or cleared the pool's NFT contract.
     SetNftContract = 12,
-    /// ``add_delegate``` authorised a new distribution delegate.
+    /// `add_delegate` authorised a new distribution delegate.
     AddDelegate = 13,
-    /// ``remove_delegate``` revoked a distribution delegate.
+    /// `remove_delegate` revoked a distribution delegate.
     RemoveDelegate = 14,
-    /// ``set_vesting_period_secs``` changed the vesting period.
+    /// `set_vesting_period_secs` changed the vesting period.
     SetVestingPeriod = 15,
-    /// ``set_pool_tiers``` replaced the time-based tier schedule.
+    /// `set_pool_tiers` replaced the time-based tier schedule.
     SetTimeTiers = 16,
-    /// ``set_pool_rank_tiers``` replaced the rank-based tier schedule.
+    /// `set_pool_rank_tiers` replaced the rank-based tier schedule.
     SetRankTiers = 17,
 }
 
@@ -311,24 +299,60 @@ pub struct PoolDistribution {
 
 /// On-chain storage record for a time-locked vesting reward.
 ///
-/// Created by ``distribute_rewards``` when ``vesting_period_secs > 0``.
+/// Created by `distribute_rewards` when `vesting_period_secs > 0`.
 /// Tokens are NOT transferred immediately; the player must call
-/// ``claim_vested`` to receive their proportional share as time elapses.
+/// `claim_vested` to receive their proportional share as time elapses.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VestingRecord {
-    /// Pool / hunt identifier.
-    pub hunt_id: u64,
-    /// Recipient of the vested reward.
-    pub player: Address,
-    /// Total amount being vested.
+    /// Ledger timestamp when vesting began (i.e. when distribute_rewards was called).
+    pub start_time: u64,
+    /// Total XLM amount (in stroops) locked in this vesting schedule.
     pub total_amount: i128,
-    /// Amount already claimed by the player.
-    pub claimed: i128,
-    /// Ledger timestamp when vesting started.
-    pub start_timestamp: u64,
-    /// Vesting duration in seconds.
-    pub period_secs: u64,
+    /// Cumulative XLM amount already claimed by the player.
+    pub claimed_amount: i128,
+    /// Vesting period in seconds (copied from the pool config at distribution time).
+    pub vesting_period_secs: u64,
+}
+
+/// Read-only view of a player's vesting status for a specific hunt.
+/// Returned by `get_vesting_status`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VestingStatus {
+    /// Ledger timestamp when vesting began.
+    pub start_time: u64,
+    /// Full vesting duration in seconds.
+    pub vesting_period_secs: u64,
+    /// Total XLM locked under this schedule.
+    pub total_amount: i128,
+    /// Cumulative XLM already claimed.
+    pub claimed_amount: i128,
+    /// XLM that has vested so far: `total_amount * min(elapsed / vesting_period_secs, 1)`.
+    pub vested_amount: i128,
+    /// XLM available to claim right now: `vested_amount - claimed_amount`.
+    pub claimable_amount: i128,
+    /// True once `claimed_amount >= total_amount`.
+    pub fully_vested: bool,
+}
+
+/// Statistical summary of distributions across a reward pool,
+/// returned by get_distribution_analytics().
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DistributionAnalytics {
+    /// Number of distributions included in the analytics window.
+    pub count: u64,
+    /// Total XLM distributed in the analytics window (stroops).
+    pub total: i128,
+    /// Average (mean) XLM amount per distribution (stroops). 0 if count is 0.
+    pub average: i128,
+    /// Median XLM amount across distributions (stroops). 0 if count is 0.
+    pub median: i128,
+    /// Minimum XLM amount in a single distribution (stroops). 0 if count is 0.
+    pub min: i128,
+    /// Maximum XLM amount in a single distribution (stroops). 0 if count is 0.
+    pub max: i128,
 }
 
 // ---------------------------------------------------------------------------

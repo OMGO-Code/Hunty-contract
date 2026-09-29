@@ -1,5 +1,9 @@
 use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
 
+/// Maximum number of co-creators allowed per hunt.
+/// Bounds the size of the co-creator list so it cannot grow without limit.
+pub const MAX_CO_CREATORS: u32 = 10;
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -80,14 +84,14 @@ pub struct Hunt {
     pub allow_partial_scoring: bool,
     /// When true, players may form teams and share clue progress.
     pub team_mode: bool,
+    /// Default point value applied to clues with 0 points. Clue-level points override this.
+    pub default_points: u32,
     /// Minimum seconds a player must wait between attempts on the same clue.
     pub attempt_cooldown_secs: u32,
     /// Maximum number of players allowed to register. 0 = unlimited.
     pub max_players: u32,
     /// When true, only players with a valid invite code may register.
     pub is_private: bool,
-    /// SHA256 hash (salted with hunt_id) of the invite code, if configured.
-    pub invite_code_hash: Option<BytesN<32>>,
     /// Dynamically recalculated on every `get_hunt` read; not meaningful when read from a raw struct literal.
     pub remaining_slots: u32,
     /// Controls who can view the hunt's leaderboard. Defaults to Public.
@@ -139,6 +143,12 @@ pub struct Clue {
     pub hint_penalty_points: u32,
 }
 
+/// Sentinel value used by `ClueInfo` when the caller is not yet allowed to
+/// see the clue question (unregistered caller, or hunt not yet started).
+/// The question field is replaced with this marker so that clients can
+/// distinguish a redacted clue from a genuinely empty question.
+pub const REDACTED_QUESTION: &str = "[locked]";
+
 /// Input payload for adding multiple clues in one contract invocation.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -164,6 +174,14 @@ pub struct ClueInfo {
     pub weight: u32,
     pub hint_available: bool,
     pub hint_penalty_points: u32,
+}
+
+impl ClueInfo {
+    /// Returns true when the question has been redacted because the caller
+    /// is not yet entitled to view it (see `get_clue`/`list_clues`).
+    pub fn is_question_redacted(&self) -> bool {
+        self.question == String::from_str(&Env::default(), REDACTED_QUESTION)
+    }
 }
 
 #[contracttype]
@@ -365,7 +383,7 @@ impl PlayerProgress {
             total_score: self.total_score,
             started_at_delta,
             completed_at_delta,
-            flags: flags.into(),
+            flags,
             recent_submissions: self.recent_submissions.clone(),
             clue_last_attempts: self.clue_last_attempts.clone(),
             required_completed_count: self.required_completed_count,
@@ -546,6 +564,14 @@ pub struct HuntStatusChangedEvent {
     pub hunt_id: u64,
     pub old_status: HuntStatus,
     pub new_status: HuntStatus,
+    pub changed_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HuntPrivacyChangedEvent {
+    pub hunt_id: u64,
+    pub is_private: bool,
     pub changed_at: u64,
 }
 
@@ -864,9 +890,53 @@ pub struct RegistrationDeadlineSetEvent {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct HuntDifficultyOverrideSetEvent {
+    pub hunt_id: u64,
+    pub caller: Address,
+    pub difficulty_override: Option<u32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct PartialScoreClaimedEvent {
     pub hunt_id: u64,
     pub player: Address,
     pub partial_score: u32,
     pub clues_completed: u32,
+}
+
+/// Emitted when a co-creator is added to a hunt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CoCreatorAddedEvent {
+    pub hunt_id: u64,
+    pub actor: Address,
+    pub co_creator: Address,
+}
+
+/// Emitted when a co-creator is removed from a hunt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CoCreatorRemovedEvent {
+    pub hunt_id: u64,
+    pub actor: Address,
+    pub co_creator: Address,
+}
+
+/// Emitted when view-only access is granted to an address for a hunt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ViewOnlyAccessGrantedEvent {
+    pub hunt_id: u64,
+    pub actor: Address,
+    pub viewer: Address,
+}
+
+/// Emitted when view-only access is revoked from an address for a hunt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ViewOnlyAccessRevokedEvent {
+    pub hunt_id: u64,
+    pub actor: Address,
+    pub viewer: Address,
 }

@@ -38,6 +38,15 @@ Reports involving the following are in scope:
 
 Please do not report ordinary bugs, feature requests, or questions through the private vulnerability channel. Use GitHub Issues for those topics when they do not expose a security risk.
 
+## Invite Codes Are Not Secrets
+
+Hunty invite codes are designed as convenience gates for joining hunts, not as cryptographic secrets. The contract stores only a hash of each code, but the hash is derived from public inputs (hunt ID and the code itself) without a secret server-side salt. Any observer who learns the hash can attempt to recover a short or human-chosen code offline. To reduce this risk:
+
+- Public getters (`get_hunt_info`, `list_hunts`, `search_hunts`) do not return `invite_code_hash`.
+- Invite codes must meet a minimum length and entropy requirement enforced by the contract.
+
+Nevertheless, do not treat invite codes as secrets against a determined attacker. If a hunt requires strong access control, use cryptographic credentials or on-chain authorization checks rather than relying on the secrecy of an invite code.
+
 ## Supported Versions
 
 Only the latest version on the `main` branch is actively maintained for security fixes. Deployed releases may require a coordinated migration or redeployment; reports should identify the affected release, commit, or deployed contract where possible.

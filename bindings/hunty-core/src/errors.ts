@@ -48,7 +48,9 @@ export const HuntErrorCode = {
   47: {message:"HuntNotStarted"},
   48: {message:"AdminAlreadyProposed"},
   49: {message:"InvalidPoints"},
-  50: {message:"HuntFull"}
+  50: {message:"HuntFull"},
+  51: {message:"LeaderboardVisibilityUnauthorized"},
+  52: {message:"PrivateHuntRequiresInvite"}
 }
 
 

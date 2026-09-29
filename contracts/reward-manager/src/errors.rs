@@ -124,14 +124,4 @@ pub enum RewardErrorCode {
     /// The hunt is in a terminal state (cancelled or ended), so its pool
     // cannot be funded.
     HuntTerminal = 2041,
-
-    /// The pool already has the maximum number of delegates. The delegate
-    // list is bounded to prevent unbounded storage growth and gas blowup.
-    TooManyDelegates = 2042,
-
-    /// Payout settings (tiers, NFT contract, distribution mode, vesting) can
-    /// only be changed while the hunt is still a Draft. Once the hunt is Active
-    /// (or in any other non-Draft state), this error is returned to prevent
-    /// a creator from altering rewards after players have already competed.
-    HuntLocked = 2043,
 }

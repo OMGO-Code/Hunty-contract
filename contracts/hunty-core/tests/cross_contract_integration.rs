@@ -12,6 +12,204 @@ use reward_manager::RewardManager;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env, String};
 
+// ============================================================================
+// Integration tests for refund_pool and migrate_pool using the real HuntyCore
+// ============================================================================
+
+#[test]
+fn test_refund_pool_with_real_hunty_core() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1_700_000_000);
+    env.mock_all_auths();
+
+    let creator = Address::generate(&env);
+
+    let (core_id, reward_manager_id, _nft_reward_id, token_address, admin) =
+        setup_environment(&env);
+
+    let sac = token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&reward_manager_id, &50_000);
+
+    let hunt_id = as_core_contract(&env, &core_id, |env| {
+        let hunt_id = HuntyCore::create_hunt(
+            env.clone(),
+            creator.clone(),
+            String::from_str(env, "Refund Hunt"),
+            String::from_str(env, "Testing refunds"),
+            None,
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+
+        HuntyCore::add_clue(
+            env.clone(),
+            hunt_id,
+            String::from_str(env, "Q"),
+            String::from_str(env, "A"),
+            10,
+            true,
+        )
+        .unwrap();
+
+        HuntyCore::set_reward_config(
+            env.clone(),
+            hunt_id,
+            100,
+            1000,
+            false,
+            None,
+            creator.clone(),
+        )
+        .unwrap();
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone());
+
+        hunt_id
+    });
+
+    env.as_contract(&reward_manager_id, || {
+        RewardManager::create_reward_pool(env.clone(), creator.clone(), hunt_id, 0).unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), hunt_id, 10_000).unwrap();
+    });
+
+    // Cancel the hunt so it becomes terminal
+    as_core_contract(&env, &core_id, |env| {
+        HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+    });
+
+    // Refund should succeed against the real HuntyCore
+    env.as_contract(&reward_manager_id, || {
+        RewardManager::refund_pool(env.clone(), hunt_id).unwrap();
+    });
+
+    let token_client = token::Client::new(&env, &token_address);
+    assert_eq!(token_client.balance(&creator), 10_000);
+}
+
+#[test]
+fn test_migrate_pool_with_real_hunty_core() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1_700_000_000);
+    env.mock_all_auths();
+
+    let creator = Address::generate(&env);
+
+    let (core_id, reward_manager_id, _nft_reward_id, token_address, admin) =
+        setup_environment(&env);
+
+    let sac = token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&reward_manager_id, &50_000);
+
+    let source_hunt_id = as_core_contract(&env, &core_id, |env| {
+        let hunt_id = HuntyCore::create_hunt(
+            env.clone(),
+            creator.clone(),
+            String::from_str(env, "Source Hunt"),
+            String::from_str(env, "Source"),
+            None,
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+
+        HuntyCore::add_clue(
+            env.clone(),
+            hunt_id,
+            String::from_str(env, "Q"),
+            String::from_str(env, "A"),
+            10,
+            true,
+        )
+        .unwrap();
+
+        HuntyCore::set_reward_config(
+            env.clone(),
+            hunt_id,
+            100,
+            1000,
+            false,
+            None,
+            creator.clone(),
+        )
+        .unwrap();
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone());
+
+        hunt_id
+    });
+
+    let target_hunt_id = as_core_contract(&env, &core_id, |env| {
+        let hunt_id = HuntyCore::create_hunt(
+            env.clone(),
+            creator.clone(),
+            String::from_str(env, "Target Hunt"),
+            String::from_str(env, "Target"),
+            None,
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+
+        HuntyCore::add_clue(
+            env.clone(),
+            hunt_id,
+            String::from_str(env, "Q"),
+            String::from_str(env, "A"),
+            10,
+            true,
+        )
+        .unwrap();
+
+        HuntyCore::set_reward_config(
+            env.clone(),
+            hunt_id,
+            100,
+            1000,
+            false,
+            None,
+            creator.clone(),
+        )
+        .unwrap();
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone());
+
+        hunt_id
+    });
+
+    env.as_contract(&reward_manager_id, || {
+        RewardManager::create_reward_pool(env.clone(), creator.clone(), source_hunt_id, 0).unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), source_hunt_id, 10_000)
+            .unwrap();
+        RewardManager::create_reward_pool(env.clone(), creator.clone(), target_hunt_id, 0).unwrap();
+    });
+
+    // Cancel the source hunt so it becomes migratable
+    as_core_contract(&env, &core_id, |env| {
+        HuntyCore::cancel_hunt(env.clone(), source_hunt_id, creator.clone()).unwrap();
+    });
+
+    // Migrate should succeed against the real HuntyCore
+    env.as_contract(&reward_manager_id, || {
+        RewardManager::migrate_pool(env.clone(), creator.clone(), source_hunt_id, target_hunt_id)
+            .unwrap();
+    });
+
+    env.as_contract(&reward_manager_id, || {
+        assert_eq!(
+            RewardManager::get_pool_balance(env.clone(), source_hunt_id),
+            0
+        );
+        assert_eq!(
+            RewardManager::get_pool_balance(env.clone(), target_hunt_id),
+            10_000
+        );
+    });
+}
+
 fn setup_environment(env: &Env) -> (Address, Address, Address, Address, Address) {
     let core_id = env.register(HuntyCore, ());
     let reward_manager_id = env.register(RewardManager, ());
@@ -106,6 +304,7 @@ fn test_hunty_core_calls_reward_manager_for_xlm_distribution() {
             1000,  // xlm_pool
             false, // nft_enabled
             None,
+            creator.clone(),
         )
         .unwrap();
 
@@ -216,6 +415,7 @@ fn test_reward_manager_calls_nft_reward_for_minting() {
             1000,
             true, // nft_enabled
             Some(nft_reward_id.clone()),
+            creator.clone(),
         )
         .unwrap();
 
@@ -313,6 +513,7 @@ fn test_xlm_and_nft_reward_distribution_combined() {
             5000,
             true,
             Some(nft_reward_id.clone()),
+            creator.clone(),
         )
         .unwrap();
 
@@ -409,6 +610,7 @@ fn test_state_consistency_across_contracts_after_distribution() {
             2500,
             true,
             Some(nft_reward_id.clone()),
+            creator.clone(),
         )
         .unwrap();
 
@@ -522,7 +724,8 @@ fn test_error_propagation_insufficient_pool_balance() {
         .unwrap();
 
         // Request 5000 XLM reward pool
-        HuntyCore::set_reward_config(env.clone(), hunt_id, 10, 5000, false, None).unwrap();
+        HuntyCore::set_reward_config(env.clone(), hunt_id, 10, 5000, false, None, creator.clone())
+            .unwrap();
 
         HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
         HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone());
@@ -607,6 +810,7 @@ fn test_error_propagation_invalid_nft_config() {
             1000,
             true,
             None, // No NFT contract provided
+            creator.clone(),
         )
         .unwrap();
 
@@ -688,6 +892,7 @@ fn test_reward_already_claimed_prevents_double_distribution() {
             1000,
             true,
             Some(nft_reward_id.clone()),
+            creator.clone(),
         )
         .unwrap();
 
@@ -782,6 +987,7 @@ fn test_multiple_players_rewards_consistency() {
             3000,
             true,
             Some(nft_reward_id.clone()),
+            creator.clone(),
         )
         .unwrap();
 
@@ -932,6 +1138,7 @@ fn test_cross_contract_call_failure_recovery() {
             1000,
             false, // NFT disabled
             None,
+            creator.clone(),
         )
         .unwrap();
 

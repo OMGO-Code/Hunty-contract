@@ -38,11 +38,6 @@ impl StringSanitizer {
         allow_empty: bool,
     ) -> Result<String, SanitizeError> {
         // Distinguish programming errors (limit > stack CAP) from oversized user input.
-        debug_assert!(
-            (max_bytes as usize) <= SANITIZE_STACK_CAP,
-            "max_bytes must be <= SANITIZE_STACK_CAP ({})",
-            SANITIZE_STACK_CAP
-        );
         if (max_bytes as usize) > SANITIZE_STACK_CAP {
             return Err(SanitizeError::LimitTooLarge);
         }

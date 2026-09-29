@@ -1,4 +1,5 @@
-//! Tests for the view-only access bounds fix (#837).
+//! Tests for the view-only access bounds fix (#837) and the
+//! clue-question visibility fix (#838).
 //!
 //! Verifies that:
 //!   1. Both the per-hunt and global view-only lists are capped at
@@ -7,6 +8,8 @@
 //!      paginated by `offset`/`limit`.
 //!   3. `is_view_only` / `is_global_view_only` are backed by O(1)
 //!      membership keys instead of scanning a list.
+//!   4. Clue questions are not returned to unregistered callers before
+//!      the hunt has started, so time-based scoring cannot be gamed.
 
 #[cfg(test)]
 mod view_only_bounds {
@@ -165,6 +168,83 @@ mod view_only_bounds {
         // The list still holds exactly MAX_VIEW_ONLY_ENTRIES members.
         let list = collect_view_only(&env, &contract_id, hunt_id);
         assert_eq!(list.len(), MAX_VIEW_ONLY_ENTRIES as u32);
+    }
+
+    // ─── Clue question visibility ─────────────────────────────────────────────
+
+    #[test]
+    fn clue_questions_hidden_before_registration_and_start() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, hunt_id, creator) = setup_hunt(&env);
+
+        // Creator adds a clue while the hunt has not started.
+        let clue_id = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                String::from_str(env, "Question?"),
+                String::from_str(env, "Answer"),
+                1,
+            )
+            .unwrap()
+        });
+
+        // An unregistered caller must not be able to read the question.
+        let stranger = Address::generate(&env);
+        let result = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::get_clue(env.clone(), hunt_id, clue_id, stranger.clone())
+        });
+        assert!(result.is_err());
+
+        // Listing clues must also be restricted for unregistered callers.
+        let list_result = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::list_clues(env.clone(), hunt_id, stranger.clone())
+        });
+        assert!(list_result.is_err());
+
+        // Paginated listing must be restricted as well.
+        let page_result = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::list_clues_paginated(env.clone(), hunt_id, stranger.clone(), 0, 10)
+        });
+        assert!(page_result.is_err());
+    }
+
+    #[test]
+    fn clue_questions_visible_after_registration_and_start() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, hunt_id, creator) = setup_hunt(&env);
+
+        let clue_id = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                String::from_str(env, "Question?"),
+                String::from_str(env, "Answer"),
+                1,
+            )
+            .unwrap()
+        });
+
+        // Activate the hunt so `start_time` is set.
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // A registered player can now read the question.
+        let player = Address::generate(&env);
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::register_for_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        let clue = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::get_clue(env.clone(), hunt_id, clue_id, player.clone())
+        })
+        .unwrap();
+        assert_eq!(clue.question, String::from_str(&env, "Question?"));
     }
 
     #[test]

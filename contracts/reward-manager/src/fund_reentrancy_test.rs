@@ -132,7 +132,8 @@ fn test_fund_reward_pool_rejects_reentrant_funding() {
     let creator = Address::generate(&env);
 
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin, token_id.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin, token_id.clone(), Address::generate(&env))
+            .unwrap();
         // Non-zero min_distribution_amount avoids the unrelated NFT-only-pool
         // validation rule; it plays no role in this reentrancy scenario.
         RewardManager::create_reward_pool(
@@ -141,6 +142,8 @@ fn test_fund_reward_pool_rejects_reentrant_funding() {
             1,
             token_id.clone(),
             10_000_000,
+            0u32,
+            true,
         )
         .unwrap();
     });

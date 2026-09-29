@@ -1,6 +1,6 @@
 use crate::types::HuntStatus;
 use crate::HuntyCore;
-use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk:(testutils::{Address as _, Ledger as _});
 use soroban_sdk::{Address, Env, String};
 
 #[test]
@@ -37,8 +37,11 @@ fn reactivation_preserves_activation_timestamp_and_registration_gate() {
             None,
         )
         .unwrap();
-        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
         hunt_id
+    });
+
+    env.as_contract(&contract_id, || {
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
     });
 
     let activated_at = env.as_contract(&contract_id, || {
@@ -53,7 +56,7 @@ fn reactivation_preserves_activation_timestamp_and_registration_gate() {
         HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
     });
     assert!(env.as_contract(&contract_id, || {
-        HuntyCore::register_player(env.clone(), hunt_id, player.clone()).is_err()
+        HuntyCore::register_player(env.clone(), hunt_id, player.clone()).is_error()
     }));
 
     env.ledger().set_timestamp(3_000);
@@ -63,7 +66,7 @@ fn reactivation_preserves_activation_timestamp_and_registration_gate() {
 
     env.as_contract(&contract_id, || {
         let hunt = HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap();
-        assert_eq!(hunt.status, HuntStatus::Active);
+        assert_eq(hunt.status, HuntStatus::Active);
         assert_eq!(hunt.activated_at, activated_at);
         HuntyCore::register_player(env.clone(), hunt_id, player).unwrap();
     });

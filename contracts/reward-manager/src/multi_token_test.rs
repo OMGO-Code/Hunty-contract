@@ -626,3 +626,197 @@ fn test_emergency_withdraw_zero_balance_pool() {
     let usdc_client = soroban_sdk::token::Client::new(&env, &usdc_token);
     assert_eq!(usdc_client.balance(&recipient), 0);
 }
+
+#[test]
+fn test_admin_withdraw_unclaimed_uses_pool_token() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let contract_id = env.register(RewardManager, ());
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (xlm_token, _xlm_admin) = create_mock_token(&env);
+    let (usdc_token, _usdc_admin) = create_mock_token(&env);
+
+    mint_tokens(&env, &usdc_token, &creator, 100_000_000);
+
+    env.as_contract(&contract_id, || {
+        init_contract(&env, &admin, &xlm_token);
+
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator.clone(),
+            1,
+            usdc_token.clone(),
+            0,
+            Some(Address::generate(&env)),
+            0,
+            true,
+        )
+        .unwrap();
+
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 100_000_000).unwrap();
+
+        // Distribute 30M, leaving 70M unclaimed
+        let player = Address::generate(&env);
+        let reward_config = RewardConfig {
+            xlm_amount: Some(30_000_000),
+            nft_contract: None,
+            nft_title: String::from_str(&env, ""),
+            nft_description: String::from_str(&env, ""),
+            nft_image_uri: String::from_str(&env, ""),
+            nft_hunt_title: String::from_str(&env, ""),
+            nft_rarity: 0,
+            nft_tier: 0,
+            completion_rank: 0,
+        };
+        RewardManager::distribute_rewards(env.clone(), 1, player.clone(), reward_config).unwrap();
+
+        // Admin withdraws 20M of the remaining 70M
+        let result = RewardManager::admin_withdraw_unclaimed(
+            env.clone(),
+            admin.clone(),
+            1,
+            recipient.clone(),
+            20_000_000,
+        );
+        assert!(result.is_ok());
+
+        let pool_status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+        assert_eq!(pool_status.balance, 50_000_000);
+    });
+
+    // Recipient should receive 20M USDC (pool token), not XLM
+    let usdc_client = soroban_sdk::token::Client::new(&env, &usdc_token);
+    assert_eq!(usdc_client.balance(&recipient), 20_000_000);
+
+    let xlm_client = soroban_sdk::token::Client::new(&env, &xlm_token);
+    assert_eq!(xlm_client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_admin_withdraw_all_uses_pool_token() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let contract_id = env.register(RewardManager, ());
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (xlm_token, _xlm_admin) = create_mock_token(&env);
+    let (usdc_token, _usdc_admin) = create_mock_token(&env);
+
+    mint_tokens(&env, &usdc_token, &creator, 80_000_000);
+
+    env.as_contract(&contract_id, || {
+        init_contract(&env, &admin, &xlm_token);
+
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator.clone(),
+            1,
+            usdc_token.clone(),
+            0,
+            Some(Address::generate(&env)),
+            0,
+            true,
+        )
+        .unwrap();
+
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 80_000_000).unwrap();
+
+        // Admin withdraws all remaining balance
+        let result =
+            RewardManager::admin_withdraw_all(env.clone(), admin.clone(), 1, recipient.clone());
+        assert!(result.is_ok());
+
+        let pool_status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+        assert_eq!(pool_status.balance, 0);
+    });
+
+    // Recipient should receive 80M USDC (pool token), not XLM
+    let usdc_client = soroban_sdk::token::Client::new(&env, &usdc_token);
+    assert_eq!(usdc_client.balance(&recipient), 80_000_000);
+
+    let xlm_client = soroban_sdk::token::Client::new(&env, &xlm_token);
+    assert_eq!(xlm_client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_admin_withdraw_multiple_pools_different_tokens() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let contract_id = env.register(RewardManager, ());
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (xlm_token, _xlm_admin) = create_mock_token(&env);
+    let (usdc_token, _usdc_admin) = create_mock_token(&env);
+    let (eurc_token, _eurc_admin) = create_mock_token(&env);
+
+    mint_tokens(&env, &usdc_token, &creator, 50_000_000);
+    mint_tokens(&env, &eurc_token, &creator, 60_000_000);
+
+    env.as_contract(&contract_id, || {
+        init_contract(&env, &admin, &xlm_token);
+
+        // Pool 1: USDC
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator.clone(),
+            1,
+            usdc_token.clone(),
+            0,
+            Some(Address::generate(&env)),
+            0,
+            true,
+        )
+        .unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
+
+        // Pool 2: EURC
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator.clone(),
+            2,
+            eurc_token.clone(),
+            0,
+            Some(Address::generate(&env)),
+            0,
+            true,
+        )
+        .unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), 2, 60_000_000).unwrap();
+
+        // Admin withdraws all from both pools
+        RewardManager::admin_withdraw_all(env.clone(), admin.clone(), 1, recipient.clone())
+            .unwrap();
+        RewardManager::admin_withdraw_all(env.clone(), admin.clone(), 2, recipient.clone())
+            .unwrap();
+
+        assert_eq!(
+            RewardManager::get_reward_pool(env.clone(), 1)
+                .unwrap()
+                .balance,
+            0
+        );
+        assert_eq!(
+            RewardManager::get_reward_pool(env.clone(), 2)
+                .unwrap()
+                .balance,
+            0
+        );
+    });
+
+    // Recipient should receive tokens from each pool's respective token
+    let usdc_client = soroban_sdk::token::Client::new(&env, &usdc_token);
+    assert_eq!(usdc_client.balance(&recipient), 50_000_000);
+
+    let eurc_client = soroban_sdk::token::Client::new(&env, &eurc_token);
+    assert_eq!(eurc_client.balance(&recipient), 60_000_000);
+
+    let xlm_client = soroban_sdk::token::Client::new(&env, &xlm_token);
+    assert_eq!(xlm_client.balance(&recipient), 0);
+}

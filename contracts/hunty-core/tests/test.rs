@@ -3,15 +3,17 @@ use reward_manager::RewardManager;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env, String};
 
-fn setup_reward_manager(env: &Env) -> (Address, Address) {
-    let reward_manager_id = env.register(RewardManager, ());
+fn setup_reward_manager(env: &Env, hunty_core: &Address) -> (Address, Address) {
     let token_admin = Address::generate(env);
     let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
     let token_address = token_contract.address();
 
-    env.as_contract(&reward_manager_id, || {
-        RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone()).unwrap();
-    });
+    // RewardManager is configured through its constructor: admin, XLM token and
+    // the HuntyCore address it consults for terminal-status checks.
+    let reward_manager_id = env.register(
+        RewardManager,
+        (token_admin, token_address.clone(), hunty_core.clone()),
+    );
 
     (reward_manager_id, token_address)
 }
@@ -28,7 +30,7 @@ fn test_cancel_hunt_with_reward_pool_refund() {
     let answer = String::from_str(&env, "a");
 
     let core_id = env.register(HuntyCore, ());
-    let (reward_manager_id, token_address) = setup_reward_manager(&env);
+    let (reward_manager_id, token_address) = setup_reward_manager(&env, &core_id);
 
     let client = HuntyCoreClient::new(&env, &core_id);
 
@@ -61,11 +63,16 @@ fn test_cancel_hunt_with_reward_pool_refund() {
             creator.clone(),
             hunt_id,
             token_address.clone(),
-            0,
+            1, /* min_distribution_amount (0 requires an NFT contract) */
             0,
             false,
         )
         .unwrap();
+    });
+
+    // Fund in its own frame: the mocked auth ledger rejects a second
+    // authorization for the same address inside a single frame.
+    env.as_contract(&reward_manager_id, || {
         RewardManager::fund_reward_pool(env.clone(), creator.clone(), hunt_id, 10_000_000).unwrap();
     });
 

@@ -159,7 +159,10 @@ fn creator_refreeze_cannot_downgrade_an_admin_freeze() {
 fn stranger_cannot_freeze_or_unfreeze() {
     let fx = setup();
 
-    assert_eq!(freeze(&fx, &fx.stranger), Err(RewardErrorCode::Unauthorized));
+    assert_eq!(
+        freeze(&fx, &fx.stranger),
+        Err(RewardErrorCode::Unauthorized)
+    );
 
     freeze(&fx, &fx.creator).unwrap();
     assert_eq!(
