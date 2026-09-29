@@ -108,6 +108,17 @@ export interface HuntDescriptionUpdatedEvent {
 }
 
 
+/**
+ * Emitted when the difficulty override on a hunt is set or cleared.
+ * `difficulty_override` is the new override value, or null when cleared.
+ */
+export interface HuntDifficultyOverrideSetEvent {
+  caller: string;
+  difficulty_override: Option<u32>;
+  hunt_id: u64;
+}
+
+
 export interface ClueCompletedEvent {
   clue_id: u32;
   hunt_id: u64;

@@ -17,8 +17,6 @@ impl Storage {
     const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTA");
     /// Ring-buffer capacity for the per-pool audit log.
     pub const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 50;
-    /// Maximum number of delegates allowed per pool.
-    pub const MAX_DELEGATES_PER_POOL: u32 = 20;
     const AUDIT_TTL_THRESHOLD: u32 = 172_800;
     const AUDIT_TTL_EXTEND_TO: u32 = 518_400;
     // Daily spending caps
@@ -58,8 +56,6 @@ impl Storage {
     const POOL_FUNDERS_KEY: soroban_sdk::Symbol = symbol_short!("PFNDRS");
     /// Per-(hunt_id, funder) cumulative amount contributed and not yet refunded.
     const POOL_FUNDER_CONTRIB_KEY: soroban_sdk::Symbol = symbol_short!("PFCONT");
-    /// Per-pool count of delegates, used to enforce MAX_DELEGATES_PER_POOL.
-    const POOL_DELEGATE_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PDCNT2");
 
     pub const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
 
@@ -230,27 +226,6 @@ impl Storage {
         player: &Address,
     ) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::DIST_NONCE_KEY, hunt_id, player.clone())
-    }
-
-    // ========== Pool Delegate Count (cap enforcement) ==========
-
-    /// Returns the number of delegates currently registered for a pool.
-    pub fn get_pool_delegate_count(env: &Env, hunt_id: u64) -> u32 {
-        let key = (Self::POOL_DELEGATE_COUNT_KEY, hunt_id);
-        env.storage().persistent().get(&key).unwrap_or(0)
-    }
-
-    pub fn set_pool_delegate_count(env: &Env, hunt_id: u64, count: u32) {
-        let key = (Self::POOL_DELEGATE_COUNT_KEY, hunt_id);
-        env.storage().persistent().set(&key, &count);
-    }
-
-    /// Increments the delegate count for a pool and returns the new value.
-    pub fn increment_pool_delegate_count(env: &Env, hunt_id: u64) -> u32 {
-        let current = Self::get_pool_delegate_count(env, hunt_id);
-        let new = current.saturating_add(1);
-        Self::set_pool_delegate_count(env, hunt_id, new);
-        new
     }
 
     // ========== Distribution Resolution ==========

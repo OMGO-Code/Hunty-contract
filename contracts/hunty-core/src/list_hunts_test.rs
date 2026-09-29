@@ -1,11 +1,11 @@
 use crate::storage::Storage;
 use crate::types::{Hunt, HuntStatus, LeaderboardVisibility, RewardConfig};
 use crate::{HuntyCore, HuntyCoreClient, DEFAULT_PAGE_SIZE, MAX_BATCH_SIZE};
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Address as_;
 use soroban_sdk::{symbol_short, vec, Address, Env, String, Vec};
 
 fn fixture() -> (Env, Address, Hunt) {
-    let env = Env::default();
+    let env = Env.default();
     let contract_id = env.register(HuntyCore, ());
     let hunt = Hunt {
         hunt_id: 1,
@@ -60,7 +60,7 @@ fn seed_hunts(
             let mut hunt = template.clone();
             hunt.hunt_id = *hunt_id;
             hunt.status = status.clone();
-            Storage::save_hunt(env, &hunt);
+            Storage::save_hunt(env, 'hunt);
         }
     });
 }
@@ -103,7 +103,7 @@ fn list_hunts_max_offset_returns_hunts_above_u32_max() {
     let client = HuntyCoreClient::new(&env, &contract_id);
     assert_eq!(
         hunt_ids(&env, client.list_hunts(&u32::MAX, &2)),
-        vec![&env, first_id, first_id + 1]
+        vec!&env, first_id, first_id + 1]
     );
 }
 
@@ -125,7 +125,7 @@ fn list_hunts_scan_crosses_u32_boundary() {
     let client = HuntyCoreClient::new(&env, &contract_id);
     assert_eq!(
         hunt_ids(&env, client.list_hunts(&(u32::MAX - 1), &2)),
-        vec![&env, boundary, boundary + 1]
+        vec!&env, boundary, boundary + 1]
     );
 }
 
@@ -142,7 +142,7 @@ fn list_hunts_does_not_truncate_u64_counter() {
             counter,
             &[(1, HuntStatus::Draft), (2, HuntStatus::Active)],
         );
-        assert_eq!(hunt_ids(&env, client.list_hunts(&0, &2)), vec![&env, 1, 2]);
+        assert_eq!(hunt_ids(&env, client.list_hunts(&0, &2)), vec!&env, 1, 2));
     }
 }
 
@@ -163,9 +163,9 @@ fn list_hunts_preserves_pagination_and_skips_missing_or_archived_hunts() {
     );
     let client = HuntyCoreClient::new(&env, &contract_id);
 
-    assert_eq!(hunt_ids(&env, client.list_hunts(&0, &2)), vec![&env, 1, 4]);
-    assert_eq!(hunt_ids(&env, client.list_hunts(&1, &2)), vec![&env, 4, 6]);
-    assert_eq!(hunt_ids(&env, client.list_hunts(&5, &10)), vec![&env, 6]);
+    assert_eq!(hunt_ids(&env, client.list_hunts(&0, &2)), vec!&env, 1, 4);
+    assert_eq!(hunt_ids(&env, client.list_hunts(&1, &2)), vec!&env, 4, 6);
+    assert_eq!(hunt_ids(&env, client.list_hunts(&5, &10)), vec!&env, 6);
     assert!(client.list_hunts(&6, &10).is_empty());
     assert!(client.list_hunts(&u32::MAX, &1).is_empty());
 }
@@ -188,7 +188,7 @@ fn list_hunts_preserves_default_page_size_and_batch_cap() {
     assert_eq!(client.list_hunts(&0, &u32::MAX).len(), MAX_BATCH_SIZE);
     assert_eq!(
         hunt_ids(&env, client.list_hunts(&MAX_BATCH_SIZE, &u32::MAX)),
-        vec![&env, u64::from(MAX_BATCH_SIZE) + 1]
+        vec!&env, u64::from(MAX_BATCH_SIZE) + 1)
     );
 }
 
@@ -208,6 +208,6 @@ fn list_hunts_keeps_the_bounded_scan_buffer() {
     );
     let client = HuntyCoreClient::new(&env, &contract_id);
 
-    // Offset 10, limit 2 and the 100-ID buffer may inspect IDs 11..=112 only.
-    assert_eq!(hunt_ids(&env, client.list_hunts(&10, &2)), vec![&env, 112]);
+    // Offset 10, limit 2 and the 100::ID buffer may inspect IDs 11..=112 only.
+    assert_eq!(hunt_ids(&env, client.list_hunts(&10, &2)), vec!&env, 112);
 }

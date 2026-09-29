@@ -1,50 +1,91 @@
 name: Auto-merge conflict-free PRs
 
-# Merges every non-draft PR into main 10 minutes after its last update, if
-# GitHub reports it has no merge conflicts. No review or status checks are
-# required.
+# Merges a non-draft PR into main when all of these hold:
+#   - Drips Wave has posted its automated-assessment comment on the PR
+#     ("@<author> Great news! ... Based on an automated assessment of this PR"),
+#     addressed to the PR's author, after the PR's latest push;
+#   - 10 minutes have passed since the last push or assessment comment;
+#   - GitHub reports the PR has no merge conflicts.
+# No review or status checks are required.
 #
-# Uses pull_request_target so fork PRs get a write-scoped token. This job must
-# never check out or run code from the PR: it only calls the GitHub API.
+# Uses pull_request_target / issue_comment so fork PRs get a write-scoped
+# token. This job must never check out or run code from the PR: it only calls
+# the GitHub API.
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
     branches: [main]
+  # Re-evaluate when Drips Wave posts its assessment after the first run.
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: auto-merge-${{ github.event.pull_request.number }}
+  group: auto-merge-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   merge:
-    name: Merge if conflict-free
-    if: ${{ !github.event.pull_request.draft }}
+    name: Merge if assessed and conflict-free
+    if: >-
+      ${{
+        (github.event_name == 'pull_request_target' && !github.event.pull_request.draft) ||
+        (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+         github.event.comment.user.login == 'drips-wave[bot]')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # A new push cancels this run (see concurrency above) and starts a fresh
-      # one, so a PR merges 10 minutes after its most recent update.
+      # A new push or assessment comment cancels this run (see concurrency
+      # above) and starts a fresh one, so the timer restarts on each update.
       - name: Wait 10 minutes
         run: sleep 600
 
-      - name: Wait for mergeability and merge
+      - name: Check assessment and mergeability, then merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
           # The PR may have been closed, merged or turned back into a draft
           # during the wait.
-          read -r pr_state is_draft < <(gh pr view "$PR" --json state,isDraft -q '"\(.state) \(.isDraft)"')
+          read -r pr_state is_draft author head_sha < <(gh pr view "$PR" \
+            --json state,isDraft,author,headRefOid \
+            -q '"\(.state) \(.isDraft) \(.author.login) \(.headRefOid)"')
           if [ "$pr_state" != "OPEN" ] || [ "$is_draft" = "true" ]; then
             echo "Not merging: PR is $pr_state (draft=$is_draft)."
             exit 0
           fi
+
+          # When the current head was pushed. Check suites are created by
+          # GitHub when the commit arrives, so this is server time; commit
+          # dates are author-controlled and can't be trusted here.
+          pushed_at=$(gh api "repos/$GH_REPO/commits/$head_sha/check-suites" \
+            -q '[.check_suites[].created_at] | min // empty')
+          if [ -z "$pushed_at" ]; then
+            pushed_at=$(gh pr view "$PR" --json commits -q '.commits[-1].committedDate')
+          fi
+          echo "PR #$PR by @$author, head $head_sha pushed at $pushed_at"
+
+          # Latest Drips Wave assessment addressed to the PR author.
+          assessed_at=$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
+            -q ".[] | select(.user.login == \"drips-wave[bot]\")
+                    | select(.body | contains(\"automated assessment of this PR\"))
+                    | select(.body | startswith(\"@$author \"))
+                    | .created_at" | sort | tail -n 1)
+          if [ -z "$assessed_at" ]; then
+            echo "Not merging: no Drips Wave assessment comment for @$author yet."
+            exit 0
+          fi
+          if [[ "$assessed_at" < "$pushed_at" ]]; then
+            echo "Not merging: assessment ($assessed_at) predates the latest push ($pushed_at)."
+            exit 0
+          fi
+          echo "Drips Wave assessment found at $assessed_at"
 
           # GitHub computes mergeability asynchronously; poll until it settles.
           for _ in $(seq 1 30); do

@@ -1,3 +1,4 @@
+
 use crate::HuntyCore;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
@@ -30,8 +31,9 @@ mod test {
     use crate::types::{
         BatchClueInput, ClueAddedEvent, ClueInfo, CreatorBlacklistedEvent,
         CreatorRemovedFromBlacklistEvent, HuntCancelledEvent, HuntClosedEvent, HuntCompletedEvent,
-        HuntCreatedEvent, HuntStatus, HuntStatusChangedEvent, LeaderboardResult, PlayerProgress,
-        PlayerRegisteredEvent, RewardClaimFailedEvent, TimeBonusConfig,
+        HuntCreatedEvent, HuntPrivacyChangedEvent, HuntStatus, HuntStatusChangedEvent,
+        LeaderboardResult, PlayerProgress, PlayerRegisteredEvent, RewardClaimFailedEvent,
+        TimeBonusConfig,
     };
 
     /// Mirrors the private production constant used for submission timestamp validation.
@@ -185,6 +187,55 @@ mod test {
             .expect("rate-limit entry must exist under (HRATE, Address)");
         assert_eq!(entry.day, day3, "stored day should be the last day");
         assert_eq!(entry.count, 1, "count should be 1 (one hunt created on day3)");
+    }
+
+    #[test]
+    fn test_daily_rate_limit_rolling_window_blocks_across_midnight() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+        // Choose a timestamp at 23:59:59 UTC on a known day.
+        let just_before_midnight = 1_700_000_000u64 / 86_400 * 86_400 + 86_399;
+        env.ledger().set_timestamp(just_before_midnight);
+        env.mock_all_auths();
+
+        // Create 10 hunts, filling the rolling window.
+        for _ in 0..10 {
+            as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Boundary Hunt"),
+                    String::from_str(env, "Boundary test"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+            });
+        }
+
+        // Advance 2 seconds across the UTC boundary.
+        env.ledger().set_timestamp(just_before_midnight + 2);
+
+        // The 10 hunts from the previous second are still inside the rolling 24h window.
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Extra hunt"),
+                String::from_str(env, "Should be rate limited"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::RateLimitExceeded));
     }
 
     /// Submits an answer at the current ledger timestamp using the given replay-protection nonce.
@@ -759,6 +810,41 @@ mod test {
             )
         });
         assert_eq!(result, Err(HuntErrorCode::RateLimitExceeded));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_max_attempts_requires_creator_auth_even_when_caller_is_forged() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Attempt Limit Hunt"),
+                String::from_str(env, "Creator authorization required"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        env.set_auths(&[]);
+        as_core_contract(&env, &contract_id, |env| {
+            let _ = HuntyCore::set_max_attempts_per_clue(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                9,
+                0,
+            );
+        });
     }
 
     #[test]
@@ -1633,6 +1719,8 @@ mod test {
 
             let ids = HuntyCore::add_clues(env.clone(), hunt_id, clues).unwrap();
             let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, Address::generate(env)).unwrap();
             let stored = HuntyCore::list_clues(env.clone(), hunt_id, 0, 10);
             (ids, hunt, stored)
         });
@@ -5195,6 +5283,50 @@ mod test {
                 let err =
                     HuntyCore::deactivate_hunt(env.clone(), hunt_id, attacker.clone()).unwrap_err();
                 assert_eq!(err, HuntErrorCode::Unauthorized);
+                let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+                assert_eq!(hunt.status, HuntStatus::Active);
+            });
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_deactivate_hunt_requires_creator_auth() {
+            let env = Env::default();
+            env.ledger().set_timestamp(1_700_000_000);
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let question = String::from_str(&env, "Valid question");
+            let answer = String::from_str(&env, "a");
+
+            with_core_contract(&env, |env, _cid| {
+                let hunt_id = HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Test Hunt"),
+                    String::from_str(env, "Test description"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+                HuntyCore::add_clue(
+                    env.clone(),
+                    hunt_id,
+                    question,
+                    answer,
+                    1,
+                    true,
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+                HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+                env.set_auths(&[]);
+                let _ = HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone());
             });
         }
 
@@ -11865,6 +11997,64 @@ mod test {
     // ========== Issues #831, #832, #833, #834 Maintenance Tests ==========
 
     #[test]
+    fn test_activate_private_hunt_without_invite_code_is_rejected() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Private Hunt"),
+                String::from_str(env, "Private hunt without invite code"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Question?"),
+                String::from_str(env, "answer"),
+                10,
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::set_hunt_privacy(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                true,
+                None,
+            )
+            .unwrap();
+        });
+
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::InvalidHuntStatus));
+
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            Storage::get_hunt(env, hunt_id).unwrap()
+        });
+        assert_eq!(hunt.status, HuntStatus::Draft);
+    }
+
+    #[test]
     fn test_issue_831_activate_hunt_reward_manager_single_read_and_no_rewards_configured() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
@@ -12173,6 +12363,71 @@ mod test {
         });
     }
 
+    // ─── Issue: add_clue_aliases must cap aliases per clue and dedupe ───
+
+    #[test]
+    fn test_add_clue_aliases_caps_and_dedupes() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Alias Cap Hunt"),
+                String::from_str(env, "Verifies alias cap and dedupe"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        let clue_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Capital of France?"),
+                String::from_str(env, "Paris"),
+                10,
+                true,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        // Add more aliases than the cap (10). Duplicates must be skipped.
+        as_core_contract(&env, &contract_id, |env| {
+            for i in 0..20u32 {
+                let alias = String::from_str(env, &format!("alias{}", i));
+                HuntyCore::add_clue_aliases(
+                    env.clone(),
+                    hunt_id,
+                    clue_id,
+                    creator.clone(),
+                    Vec::from_array(env, [alias]),
+                )
+                .unwrap();
+            }
+        });
+
+        let clue = as_core_contract(&env, &contract_id, |env| {
+            Storage::get_clue(env, hunt_id, clue_id).unwrap()
+        });
+        // 1 original answer hash + at most 10 aliases.
+        assert!(
+            clue.answer_hashes.len() <= 11,
+            "aliases per clue must be capped, got {}",
+            clue.answer_hashes.len()
+        );
+    }
+
     // ─── Issue #808: save_processed_submission must not fire on validation failure ───
 
     /// A submission that fails with ClueNotFound must NOT consume its nonce.
@@ -12258,6 +12513,129 @@ mod test {
         });
         assert!(ok.is_ok(),
             "retry with same nonce after ClueNotFound must succeed, got: {:?}", ok);
+    }
+
+    // ── cancel_hunt terminal-state tests (Closes #cancel-archived-emergency) ──
+
+    /// cancel_hunt must reject an Archived hunt (terminal) and must not emit a
+    /// HuntStatusChanged event or run the refund flow again.
+    #[test]
+    fn test_cancel_hunt_rejects_archived_hunt() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Archived Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            let mut hunt = Storage::get_hunt(env, hid).unwrap();
+            hunt.status = HuntStatus::Archived;
+            Storage::save_hunt(env, &hunt);
+            hid
+        });
+
+        let res = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone())
+        });
+        assert_eq!(res, Err(HuntErrorCode::InvalidHuntStatus));
+
+        // Status must remain Archived and no status-change event emitted.
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Archived);
+        });
+        assert!(
+            find_hunt_status_event_for_hunt(&env, hunt_id, HuntStatus::Cancelled).is_none(),
+            "Archived hunt must not emit a Cancelled status change"
+        );
+    }
+
+    /// cancel_hunt must reject an EmergencyStopped hunt and must not emit a
+    /// HuntStatusChanged event or run the refund flow again.
+    #[test]
+    fn test_cancel_hunt_rejects_emergency_stopped_hunt() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Emergency Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            let mut hunt = Storage::get_hunt(env, hid).unwrap();
+            hunt.status = HuntStatus::EmergencyStopped;
+            Storage::save_hunt(env, &hunt);
+            hid
+        });
+
+        let res = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone())
+        });
+        assert_eq!(res, Err(HuntErrorCode::InvalidHuntStatus));
+
+        // Status must remain EmergencyStopped and no status-change event emitted.
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::EmergencyStopped);
+        });
+        assert!(
+            find_hunt_status_event_for_hunt(&env, hunt_id, HuntStatus::Cancelled).is_none(),
+            "EmergencyStopped hunt must not emit a Cancelled status change"
+        );
+    }
+
+    /// cancel_hunt must still succeed from Draft (allowed non-terminal state).
+    #[test]
+    fn test_cancel_hunt_allows_draft_hunt() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Draft Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Cancelled);
+        });
     }
 
     // ── create_hunt auth tests (Closes #789) ────────────────────────────────

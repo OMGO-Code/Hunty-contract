@@ -18,7 +18,7 @@
 
 #![allow(deprecated)]
 
-use nft_reward::{CollectionMetadata, NftMintedEvent, NftMetadata, NftReward, NftRewardClient};
+use nft_reward::{CollectionMetadata, NftMetadata, NftMintedEvent, NftReward, NftRewardClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     vec, Address, Env, IntoVal, Map, String, Symbol,
@@ -115,9 +115,11 @@ fn total_minted_for_hunt_is_scoped_to_the_hunt_not_the_collection() {
 
     // Interleaved hunts: a collection-wide counter would report 1, 2, 3, 4 here.
     let first = mint_and_assert_event(&env, &contract_id, &client, &minter, 7, &owner, "Hunt 7", 1);
-    let second = mint_and_assert_event(&env, &contract_id, &client, &minter, 8, &owner, "Hunt 8", 1);
+    let second =
+        mint_and_assert_event(&env, &contract_id, &client, &minter, 8, &owner, "Hunt 8", 1);
     let third = mint_and_assert_event(&env, &contract_id, &client, &minter, 7, &owner, "Hunt 7", 2);
-    let fourth = mint_and_assert_event(&env, &contract_id, &client, &minter, 8, &owner, "Hunt 8", 2);
+    let fourth =
+        mint_and_assert_event(&env, &contract_id, &client, &minter, 8, &owner, "Hunt 8", 2);
 
     assert_eq!(client.total_supply(), 4);
     assert_eq!(client.get_hunt_nft_count(&7), 2);

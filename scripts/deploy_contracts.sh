@@ -18,7 +18,6 @@ case "$ENVIRONMENT" in
   *)
     echo "Usage: $0 <testnet|staging|mainnet> <stellar-source-account>" >&2
     exit 1
-    ;;
 esac
 
 if [[ -z "$SOURCE_ACCOUNT" ]]; then
@@ -34,6 +33,8 @@ require_cmd() {
 deploy_contract() {
   local name="$1"
   local wasm="target/wasm32v1-none/release/${name}.wasm"
+  shift
+  local constructor_args=("$@")
 
   if [[ ! -f "$wasm" ]]; then
     echo "Missing WASM: $wasm" >&2
@@ -41,20 +42,50 @@ deploy_contract() {
     exit 1
   fi
 
-  stellar contract deploy \
-    --wasm "$wasm" \
-    --source "$SOURCE_ACCOUNT" \
-    --rpc-url "$RPC_URL" \
-    --network-passphrase "$PASSPHRASE"
+  if [[ ${#constructor_args[@]} -gt 0 ]]; then
+    stellar contract deploy \
+      --wasm "$wasm" \
+      --source "$SOURCE_ACCOUNT" \
+      --rpc-url "$RPC_URL" \
+      --network-passphrase "$PASSPHRASE" \
+      -- "${constructor_args[@]}"
+  else
+    stellar contract deploy \
+      --wasm "$wasm" \
+      --source "$SOURCE_ACCOUNT" \
+      --rpc-url "$RPC_URL" \
+      --network-passphrase "$PASSPHRASE"
+  fi
 }
 
 require_cmd stellar
 
 echo "Deploying Hunty contracts to $ENVIRONMENT ($NETWORK)"
 
-NFT_REWARD_ID="$(deploy_contract nft_reward)"
-REWARD_MANAGER_ID="$(deploy_contract reward_manager)"
+# Get deployer address for use as admin/minter
+DEPLOYER_ADDRESS=$(stellar keys address "$SOURCE_ACCOUNT")
+
+# Query native XLM token address for the network
+XLM_TOKEN_ADDRESS=$(stellar contract id asset --asset native --network "$NETWORK")
+
+# Deploy hunty-core first (no constructor args needed)
 HUNTY_CORE_ID="$(deploy_contract hunty_core)"
+
+# Deploy reward-manager with constructor args: admin, xlm_token, hunty_core
+REWARD_MANAGER_ID="$(deploy_contract reward_manager \
+  "$DEPLOYER_ADDRESS" \
+  "$XLM_TOKEN_ADDRESS" \
+  "$HUNTY_CORE_ID")"
+
+# Deploy nft-reward with constructor args: admin, minter, max_supply, metadata
+# max_supply = 0 means unlimited (optional, 0 = None in contract)
+# metadata: name, description, total_supply, creator
+NFT_METADATA="{\"name\":\"Hunty NFT Reward\",\"description\":\"Reward NFTs for completed hunts\",\"total_supply\":0,\"creator\":\"$DEPLOYER_ADDRESS\"}"
+NFT_REWARD_ID="$(deploy_contract nft_reward \
+  "$DEPLOYER_ADDRESS" \
+  "$DEPLOYER_ADDRESS" \
+  "0" \
+  "$NFT_METADATA")"
 
 cat > "config/contracts.${ENVIRONMENT}.json" <<JSON
 {
