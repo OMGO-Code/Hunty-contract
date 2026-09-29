@@ -1,4 +1,4 @@
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, Address, Env, Symbol};
 
 use hunty_core::rate_limit::{RateLimitData, RateLimiter, SECONDS_PER_DAY};
 
@@ -15,8 +15,17 @@ fn test_single_rate_limit_storage_entry_across_days() {
         assert!(RateLimiter::check_and_increment(&env, &creator, now).is_ok());
     }
 
-    let entry: Option<RateLimitData> = env.storage().persistent().get(&creator);
-    assert!(entry.is_some());
+    // RateLimiter stores data under the namespaced key (Symbol("HRATE"), Address)
+    // in persistent storage — never under the bare Address key.
+    let bare_entry: Option<RateLimitData> = env.storage().persistent().get(&creator);
+    assert!(
+        bare_entry.is_none(),
+        "rate-limit must not be stored under bare Address key"
+    );
+
+    let namespaced_key = (Symbol::new(&env, "HRATE"), creator.clone());
+    let entry: Option<RateLimitData> = env.storage().persistent().get(&namespaced_key);
+    assert!(entry.is_some(), "rate-limit entry must exist under (HRATE, Address) key");
     let entry = entry.unwrap();
 
     let expected_day = day3 / SECONDS_PER_DAY;

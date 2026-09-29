@@ -6,7 +6,7 @@
 
 mod errors;
 mod migration;
-mod rate_limit;
+pub mod rate_limit;
 mod sanitization;
 mod storage;
 pub mod types;

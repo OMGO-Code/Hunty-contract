@@ -152,19 +152,15 @@ mod test {
         let day2 = days[1] / 86_400;
         let day3 = days[2] / 86_400;
 
-        assert_eq!(
-            Storage::get_creator_daily_hunt_count(&env, &creator, day1),
-            0
-        );
-        assert_eq!(
-            Storage::get_creator_daily_hunt_count(&env, &creator, day2),
-            0
-        );
-        assert_eq!(
-            Storage::get_creator_daily_hunt_count(&env, &creator, day3),
-            1
-        );
+        // RateLimiter::check_and_increment (called from create_hunt) stores a
+        // single RateLimitData entry per creator under the namespaced persistent
+        // key (Symbol("HRATE"), Address). Old per-day keys and bare-address keys
+        // must not exist.
 
+        use crate::rate_limit::RateLimitData;
+        let namespaced_key = (Symbol::new(&env, "HRATE"), creator.clone());
+
+        // Old triple-tuple per-day keys must not exist.
         let prefix = Symbol::new(&env, "CreatorDailyHuntCount");
         for day in [day1, day2, day3] {
             let old_key = (prefix.clone(), creator.clone(), day);
@@ -175,7 +171,20 @@ mod test {
             );
         }
 
-        assert!(env.storage().persistent().has(&(prefix, creator)));
+        // Bare address key must not exist.
+        assert!(
+            !env.storage().persistent().has(&creator),
+            "rate-limit must not be stored under bare Address key"
+        );
+
+        // Exactly one namespaced entry exists, holding the last day and count = 1.
+        let entry: RateLimitData = env
+            .storage()
+            .persistent()
+            .get(&namespaced_key)
+            .expect("rate-limit entry must exist under (HRATE, Address)");
+        assert_eq!(entry.day, day3, "stored day should be the last day");
+        assert_eq!(entry.count, 1, "count should be 1 (one hunt created on day3)");
     }
 
     /// Submits an answer at the current ledger timestamp using the given replay-protection nonce.
