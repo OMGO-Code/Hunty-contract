@@ -174,7 +174,8 @@ pub struct RewardPoolStatus {
     pub frozen_by: Option<Address>,
 }
 
-/// Pending NFT mint that failed and can be retried by the admin.
+/// Pending NFT mint that failed and can be retried by the player or anyone
+/// paying the transaction fee on behalf of the player.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingNftMint {

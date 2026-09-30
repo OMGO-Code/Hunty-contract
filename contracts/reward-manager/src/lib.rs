@@ -2693,11 +2693,15 @@ impl RewardManager {
     /// Retries a failed NFT mint for a previously distributed reward.
     ///
     /// When NFT minting fails during `distribute_rewards`, the failure is logged
-    /// and the pending mint data is stored. This function allows the admin to
-    /// retry the failed NFT mint and update the distribution record.
+    /// and the pending mint data is stored. This function allows the player
+    /// (or anyone paying the transaction fee on behalf of the player) to
+    /// retry the failed NFT mint and update the distribution record. The
+    /// successfully minted NFT is always sent to the `player` address
+    /// recorded in the pending mint, regardless of who calls this function.
     ///
     /// # Arguments
-    /// * `admin` - The contract admin address
+    /// * `caller` - The address signing the transaction (any address; NFT is
+    ///              still delivered to the `player` recorded in the pending mint)
     /// * `hunt_id` - The hunt associated with the failed NFT mint
     /// * `player` - The player who should receive the NFT
     ///
@@ -2705,17 +2709,16 @@ impl RewardManager {
     /// The NFT ID of the successfully minted NFT
     ///
     /// # Errors
-    /// * `NotInitialized` - Contract not initialized
-    /// * `Unauthorized` - Caller is not the contract admin
     /// * `NftMintPendingNotFound` - No pending failed NFT mint for this hunt/player
+    /// * `PoolNotFound` - No pool config exists for this hunt_id
     /// * `NftMintFailed` - NFT mint attempt failed again
     pub fn retry_failed_nft_mint(
         env: Env,
-        admin: Address,
+        caller: Address,
         hunt_id: u64,
         player: Address,
     ) -> Result<u64, RewardErrorCode> {
-        Self::require_admin(&env, &admin)?;
+        caller.require_auth();
 
         let pending = Storage::get_pending_nft_mint(&env, hunt_id, &player)
             .ok_or(RewardErrorCode::NftMintPendingNotFound)?;
@@ -2748,6 +2751,28 @@ impl RewardManager {
         Storage::remove_pending_nft_mint(&env, hunt_id, &player);
 
         Ok(nft_id)
+    }
+
+    /// Returns a paginated list of all pending failed NFT mints across the
+    /// entire contract.
+    ///
+    /// Each entry contains the full mint metadata (hunt, player, NFT contract,
+    /// rarity, etc.) so callers can identify which mints need to be retried.
+    ///
+    /// # Arguments
+    /// * `offset` - Starting index for pagination (0-based)
+    /// * `limit` - Maximum number of entries to return
+    ///
+    /// # Returns
+    /// A `Vec<PendingNftMint>` of pending mint entries, up to `limit` entries
+    /// starting from `offset`. Returns an empty `Vec` when `offset` is beyond
+    /// the end of the list or when no pending mints exist.
+    pub fn list_pending_nft_mints(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<PendingNftMint> {
+        Storage::list_pending_nft_mints(&env, offset, limit)
     }
 
     /// Returns the total XLM distributed across all hunts (protocol-level metric).

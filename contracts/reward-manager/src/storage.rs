@@ -58,6 +58,7 @@ impl Storage {
     const POOL_FUNDER_CONTRIB_KEY: soroban_sdk::Symbol = symbol_short!("PFCONT");
 
     pub const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
+    const PENDING_NFT_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PNFTLST");
 
     // ========== Vesting ==========
     const VESTING_KEY: soroban_sdk::Symbol = symbol_short!("VEST");
@@ -764,6 +765,28 @@ impl Storage {
     ) {
         let key = Self::pending_nft_key(hunt_id, player);
         env.storage().persistent().set(&key, pending);
+
+        let list_key = Self::pending_nft_list_key();
+        let mut list: Vec<crate::PendingNftMint> = env
+            .storage()
+            .persistent()
+            .get(&list_key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut found = false;
+        for i in 0..list.len() {
+            if let Some(existing) = list.get(i) {
+                if existing.hunt_id == hunt_id && existing.player == *player {
+                    list.set(i, pending.clone());
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            list.push_back(pending.clone());
+        }
+        env.storage().persistent().set(&list_key, &list);
     }
 
     pub fn get_pending_nft_mint(
@@ -778,10 +801,58 @@ impl Storage {
     pub fn remove_pending_nft_mint(env: &Env, hunt_id: u64, player: &Address) {
         let key = Self::pending_nft_key(hunt_id, player);
         env.storage().persistent().remove(&key);
+
+        let list_key = Self::pending_nft_list_key();
+        let list: Vec<crate::PendingNftMint> = env
+            .storage()
+            .persistent()
+            .get(&list_key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut new_list = Vec::new(env);
+        for i in 0..list.len() {
+            if let Some(existing) = list.get(i) {
+                if existing.hunt_id != hunt_id || existing.player != *player {
+                    new_list.push_back(existing);
+                }
+            }
+        }
+        env.storage().persistent().set(&list_key, &new_list);
+    }
+
+    pub fn list_pending_nft_mints(
+        env: &Env,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<crate::PendingNftMint> {
+        let list_key = Self::pending_nft_list_key();
+        let all: Vec<crate::PendingNftMint> = env
+            .storage()
+            .persistent()
+            .get(&list_key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let total = all.len();
+        if offset >= total {
+            return Vec::new(env);
+        }
+
+        let end_index = core::cmp::min(offset + limit, total);
+        let mut result = Vec::new(env);
+        for i in offset..end_index {
+            if let Some(entry) = all.get(i) {
+                result.push_back(entry);
+            }
+        }
+        result
     }
 
     pub fn pending_nft_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::PENDING_NFT_KEY, hunt_id, player.clone())
+    }
+
+    fn pending_nft_list_key() -> soroban_sdk::Symbol {
+        Self::PENDING_NFT_LIST_KEY
     }
 
     // ========== Vesting Records ==========

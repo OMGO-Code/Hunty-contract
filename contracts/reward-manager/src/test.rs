@@ -2254,36 +2254,140 @@ mod test {
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let admin = Address::generate(&env);
+        let caller = Address::generate(&env);
         let player = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
         });
-        // Re-mock before the admin-authenticated retry call (see note in
-        // test_admin_adds_authorized_contract).
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
             let result =
-                RewardManager::retry_failed_nft_mint(env.clone(), admin.clone(), 1, player.clone());
+                RewardManager::retry_failed_nft_mint(env.clone(), caller.clone(), 1, player.clone());
             assert_eq!(result, Err(RewardErrorCode::NftMintPendingNotFound));
         });
     }
 
     #[test]
-    fn test_retry_failed_nft_mint_rejects_unauthorized_caller() {
+    fn test_retry_failed_nft_mint_allows_any_caller_with_auth() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let admin = Address::generate(&env);
-        let attacker = Address::generate(&env);
+        let unrelated_caller = Address::generate(&env);
         let player = Address::generate(&env);
+        let missing_nft = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
 
-            let result =
-                RewardManager::retry_failed_nft_mint(env.clone(), attacker, 1, player.clone());
-            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                Address::generate(&env),
+                1,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0u32,
+                true,
+            )
+            .unwrap();
+
+            let config = RewardConfig {
+                xlm_amount: None,
+                nft_contract: Some(missing_nft),
+                nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+                nft_description: soroban_sdk::String::from_str(&env, "desc"),
+                nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+                nft_rarity: 0,
+                nft_tier: 0,
+                completion_rank: 0,
+            };
+
+            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
+
+            assert!(Storage::get_pending_nft_mint(&env, 1, &player).is_some());
+        });
+
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::retry_failed_nft_mint(
+                env.clone(),
+                unrelated_caller.clone(),
+                1,
+                player.clone(),
+            );
+            assert_ne!(result, Err(RewardErrorCode::Unauthorized));
+        });
+    }
+
+    #[test]
+    fn test_list_pending_nft_mints_empty() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+
+            let empty = RewardManager::list_pending_nft_mints(env.clone(), 0, 10);
+            assert_eq!(empty.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_list_pending_nft_mints_after_failed_nft() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let missing_nft = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                Address::generate(&env),
+                1,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0u32,
+                true,
+            )
+            .unwrap();
+
+            let make_config = || RewardConfig {
+                xlm_amount: None,
+                nft_contract: Some(missing_nft.clone()),
+                nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+                nft_description: soroban_sdk::String::from_str(&env, "desc"),
+                nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+                nft_rarity: 0,
+                nft_tier: 0,
+                completion_rank: 0,
+            };
+
+            RewardManager::distribute_rewards(env.clone(), 1, player1.clone(), make_config()).unwrap();
+            RewardManager::distribute_rewards(env.clone(), 1, player2.clone(), make_config()).unwrap();
+
+            let all = RewardManager::list_pending_nft_mints(env.clone(), 0, 10);
+            assert_eq!(all.len(), 2);
+
+            let first = all.get(0).unwrap();
+            assert_eq!(first.hunt_id, 1);
+
+            let paginated = RewardManager::list_pending_nft_mints(env.clone(), 1, 1);
+            assert_eq!(paginated.len(), 1);
+
+            let beyond = RewardManager::list_pending_nft_mints(env.clone(), 10, 10);
+            assert_eq!(beyond.len(), 0);
         });
     }
 
