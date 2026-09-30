@@ -1975,12 +1975,18 @@ impl RewardManager {
     /// Legacy entrypoint retained for existing integrations. New contract
     /// integrations should use `distribute_rewards_authorized`, which carries
     /// and authenticates the calling contract explicitly.
+    ///
+    /// Authorization is fail-closed: the caller must be an authorized
+    /// distributor (see `add_authorized_contract`). Unauthorized callers
+    /// receive `Unauthorized`.
     pub fn distribute_rewards(
         env: Env,
+        caller: Address,
         hunt_id: u64,
         player_address: Address,
         reward_config: RewardConfig,
     ) -> Result<(), RewardErrorCode> {
+        Self::require_authorized_distributor(&env, &caller)?;
         Self::distribute_rewards_impl(env, hunt_id, player_address, reward_config)
     }
 
