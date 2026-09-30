@@ -107,6 +107,8 @@ mod list_hunts_test;
 #[path = "paused_status_test.rs"]
 mod paused_status_test;
 #[cfg(test)]
+mod registration_capacity_test;
+#[cfg(test)]
 mod submission_recording_test;
 // Regression tests for #1011-#1014 (admin persistence, reward-config auth,
 // global pause checks, duplicate registration).
@@ -2569,6 +2571,49 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Applies the constraints shared by public and invite registration, then
+    /// persists the player.
+    ///
+    /// Callers run their own pre-checks first — the public/invite split and the
+    /// duplicate-registration rule genuinely differ between the two paths — and
+    /// then delegate here so the capacity and deadline rules cannot drift apart.
+    ///
+    /// Order matters: every check runs before `save_player_progress`, so a
+    /// rejected registration persists nothing. Within a single Soroban
+    /// invocation the count read and the write are atomic, so the check-then-act
+    /// sequence cannot interleave with another registration.
+    fn complete_registration(
+        env: &Env,
+        hunt: &Hunt,
+        player: &Address,
+        current_time: u64,
+    ) -> Result<(), HuntErrorCode> {
+        Self::ensure_registration_deadline_not_passed(hunt, current_time)?;
+        Self::ensure_hunt_not_full(env, hunt.hunt_id, hunt.max_players)?;
+
+        let progress = PlayerProgress::new(env, player.clone(), hunt.hunt_id, current_time);
+        Storage::save_player_progress(env, &progress, hunt.activated_at);
+        Ok(())
+    }
+
+    /// Rejects registration when the hunt is already at `max_players`.
+    ///
+    /// A `max_players` of 0 means "unlimited", matching the other optional hunt
+    /// limits.
+    fn ensure_hunt_not_full(
+        env: &Env,
+        hunt_id: u64,
+        max_players: u32,
+    ) -> Result<(), HuntErrorCode> {
+        if max_players == 0 {
+            return Ok(());
+        }
+        if Storage::get_player_count(env, hunt_id) >= max_players {
+            return Err(HuntErrorCode::HuntFull);
+        }
+        Ok(())
+    }
+
     pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
         player.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -2601,9 +2646,6 @@ impl HuntyCore {
         // Cache read: cheaper than loading full Hunt from persistent storage
         let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
 
-        // Enforce the registration deadline if the creator configured one
-        Self::ensure_registration_deadline_not_passed(&hunt, current_time)?;
-
         // Single duplicate-registration check: reject a player who is already
         // registered for this hunt in the current activation cycle. Progress
         // from a previous cycle (the hunt was deactivated and reactivated) is
@@ -2614,8 +2656,9 @@ impl HuntyCore {
             }
         }
 
-        let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
-        Storage::save_player_progress(&env, &progress, hunt.activated_at);
+        // Deadline, max_players and the progress write. Public registration
+        // enforces max_players exactly as invite registration does.
+        Self::complete_registration(&env, &hunt, &player, current_time)?;
 
         let event = PlayerRegisteredEvent {
             hunt_id,
@@ -2938,24 +2981,12 @@ impl HuntyCore {
         // Cache read: cheaper than loading full Hunt from persistent storage
         let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
 
-        // Enforce the registration deadline. A valid invite does not exempt a
-        // player from the deadline the creator set for the hunt, so this is the
-        // same check register_player applies.
-        Self::ensure_registration_deadline_not_passed(&hunt, current_time)?;
-
         if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
             return Err(HuntErrorCode::DuplicateRegistration);
         }
 
-        if hunt.max_players > 0 {
-            let count = Storage::get_player_count(&env, hunt_id);
-            if count >= hunt.max_players {
-                return Err(HuntErrorCode::HuntFull);
-            }
-        }
-
-        let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
-        Storage::save_player_progress(&env, &progress, hunt.activated_at);
+        // Deadline, max_players and the progress write.
+        Self::complete_registration(&env, &hunt, &player, current_time)?;
 
         let event = PlayerRegisteredWithInviteEvent {
             hunt_id,
