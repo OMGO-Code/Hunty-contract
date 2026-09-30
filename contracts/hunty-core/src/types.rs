@@ -96,6 +96,8 @@ pub struct Hunt {
     pub remaining_slots: u32,
     /// Controls who can view the hunt's leaderboard. Defaults to Public.
     pub leaderboard_visibility: LeaderboardVisibility,
+    /// SHA256 hash of the invite code (salted with hunt_id). None if no invite code is set.
+    pub invite_code_hash: Option<BytesN<32>>,
 }
 
 #[contracttype]

@@ -16,22 +16,23 @@ use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent,
-    ClueAliasesAddedEvent, ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent,
-    CreatorRemovedFromBlacklistEvent, GcReport, Hunt, HuntActivatedEvent, HuntArchivedEvent,
-    HuntCache, HuntCancelledEvent, HuntClonedEvent, HuntClosedEvent, HuntCompletedEvent,
-    HuntCreatedEvent, HuntDeactivatedEvent, HuntDescriptionUpdatedEvent,
-    HuntDifficultyOverrideSetEvent, HuntGarbageCollectedEvent, HuntPrivacyChangedEvent,
-    HuntReactivatedEvent, HuntStatistics, HuntStatus, HuntStatusChangedEvent,
-    InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry, LeaderboardIndexEntry,
-    LeaderboardResult, LeaderboardVisibility, PlayerBannedEvent, PlayerProgress,
-    PlayerRegisteredEvent, PlayerRegisteredWithInviteEvent, PlayerUnbannedEvent,
+    ClueAliasesAddedEvent, ClueCompletedEvent, ClueInfo, CoCreatorAddedEvent,
+    CoCreatorRemovedEvent, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, GcReport,
+    Hunt, HuntActivatedEvent, HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClonedEvent,
+    HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
+    HuntDescriptionUpdatedEvent, HuntDifficultyOverrideSetEvent, HuntGarbageCollectedEvent,
+    HuntPrivacyChangedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
+    HuntStatusChangedEvent, InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry,
+    LeaderboardIndexEntry, LeaderboardResult, LeaderboardVisibility, PlayerBannedEvent,
+    PlayerProgress, PlayerRegisteredEvent, PlayerRegisteredWithInviteEvent, PlayerUnbannedEvent,
     RegistrationDeadlineSetEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
-    TimeBonusConfig,
+    TimeBonusConfig, ViewOnlyAccessGrantedEvent, ViewOnlyAccessRevokedEvent,
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
+    contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
+    Val, Vec,
 };
 
 const MAX_TITLE_BYTES: u32 = 200;
@@ -55,7 +56,7 @@ enum CreationRateLimitKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
 
     #[test]
     fn max_submissions_per_minute_zero_is_unlimited_sentinel() {
@@ -65,23 +66,32 @@ mod tests {
     #[test]
     fn hunt_creation_rate_limit_is_rolling_across_utc_midnight() {
         let env = Env::default();
+        let contract_id = env.register(HuntyCore, ());
         env.ledger().set_timestamp(86_399);
         let creator = Address::generate(&env);
-        for _ in 0..10 {
-            assert!(
-                HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
-                    .is_ok()
-            );
-        }
-        assert!(
-            HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
-                .is_err()
-        );
-        env.ledger().set_timestamp(86_401);
-        assert!(
-            HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
-                .is_err()
-        );
+        env.as_contract(&contract_id, || {
+            for _ in 0..10 {
+                assert!(HuntyCore::check_hunt_creation_rate_limit(
+                    &env,
+                    &creator,
+                    env.ledger().timestamp()
+                )
+                .is_ok());
+            }
+            assert!(HuntyCore::check_hunt_creation_rate_limit(
+                &env,
+                &creator,
+                env.ledger().timestamp()
+            )
+            .is_err());
+            env.ledger().set_timestamp(86_401);
+            assert!(HuntyCore::check_hunt_creation_rate_limit(
+                &env,
+                &creator,
+                env.ledger().timestamp()
+            )
+            .is_err());
+        });
     }
 }
 
@@ -207,6 +217,16 @@ impl HuntyCore {
     fn ensure_not_paused(env: &Env) -> Result<(), HuntErrorCode> {
         if Storage::is_contract_paused(env) {
             return Err(HuntErrorCode::ContractPaused);
+        }
+        Ok(())
+    }
+
+    /// Returns Ok if clues are visible to callers (hunt exists and is not in Draft).
+    /// Draft-status hunts hide clue questions to prevent pre-game answer farming.
+    fn require_clues_visible(env: &Env, hunt_id: u64) -> Result<(), HuntErrorCode> {
+        let hunt = Storage::get_hunt(env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.status == HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
         }
         Ok(())
     }
@@ -1275,13 +1295,13 @@ impl HuntyCore {
                     MAX_QUESTION_LENGTH,
                     false,
                 )
-                .map_err(|_| HuntErrorCode::InvalidHint)?,
+                .map_err(|_| HuntErrorCode::InvalidPoints)?,
             ),
             None => None,
         };
         clue.hint_penalty_points = if clue.hint.is_some() {
             if hint_penalty_points > clue.points {
-                return Err(HuntErrorCode::InvalidHint);
+                return Err(HuntErrorCode::InvalidPoints);
             }
             hint_penalty_points
         } else {
@@ -1982,11 +2002,10 @@ impl HuntyCore {
             if !entry.is_completed {
                 continue;
             }
-            let mut progress =
-                match Storage::get_player_progress(&env, hunt_id, &entry.player) {
-                    Some(progress) => progress,
-                    None => continue,
-                };
+            let mut progress = match Storage::get_player_progress(&env, hunt_id, &entry.player) {
+                Some(progress) => progress,
+                None => continue,
+            };
             if !progress.reward_claimed
                 && progress.completion_rank > 0
                 && progress.completion_rank <= hunt.reward_config.max_winners
@@ -3968,10 +3987,8 @@ impl HuntyCore {
             actor: creator.clone(),
             viewer: viewer.clone(),
         };
-        env.events().publish(
-            (Symbol::new(&env, "ViewOnlyAccessGranted"), hunt_id),
-            event,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "ViewOnlyAccessGranted"), hunt_id), event);
 
         Ok(())
     }
@@ -3997,10 +4014,8 @@ impl HuntyCore {
             actor: creator.clone(),
             viewer: viewer.clone(),
         };
-        env.events().publish(
-            (Symbol::new(&env, "ViewOnlyAccessRevoked"), hunt_id),
-            event,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "ViewOnlyAccessRevoked"), hunt_id), event);
 
         Ok(())
     }
@@ -4025,7 +4040,7 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
         if Storage::get_co_creators(&env, hunt_id).len() >= MAX_CO_CREATORS_PER_HUNT {
-            return Err(HuntErrorCode::TooManyCoCreators);
+            return Err(HuntErrorCode::TooManyClues);
         }
         Storage::add_co_creator(&env, hunt_id, &new_co_creator);
 
@@ -4034,10 +4049,8 @@ impl HuntyCore {
             actor: creator.clone(),
             co_creator: new_co_creator.clone(),
         };
-        env.events().publish(
-            (Symbol::new(&env, "CoCreatorAdded"), hunt_id),
-            event,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "CoCreatorAdded"), hunt_id), event);
 
         Ok(())
     }
@@ -4060,10 +4073,8 @@ impl HuntyCore {
             actor: creator.clone(),
             co_creator: co_creator_to_remove.clone(),
         };
-        env.events().publish(
-            (Symbol::new(&env, "CoCreatorRemoved"), hunt_id),
-            event,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "CoCreatorRemoved"), hunt_id), event);
 
         Ok(())
     }

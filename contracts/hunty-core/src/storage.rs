@@ -1105,11 +1105,7 @@ impl Storage {
     ///
     /// # Returns
     /// A Vec of completed, unclaimed PlayerProgress entries, capped at `limit`.
-    pub fn get_completed_hunt_players(
-        env: &Env,
-        hunt_id: u64,
-        limit: u32,
-    ) -> Vec<PlayerProgress> {
+    pub fn get_completed_hunt_players(env: &Env, hunt_id: u64, limit: u32) -> Vec<PlayerProgress> {
         let entries = Self::get_leaderboard_index(env, hunt_id);
 
         let mut progress_list = Vec::new(env);
@@ -1122,9 +1118,7 @@ impl Storage {
 
         for i in 0..cap {
             if let Some(entry) = entries.get(i) {
-                if let Some(progress) =
-                    Self::get_player_progress(env, hunt_id, &entry.player)
-                {
+                if let Some(progress) = Self::get_player_progress(env, hunt_id, &entry.player) {
                     if progress.is_completed && !progress.reward_claimed {
                         progress_list.push_back(progress);
                     }
@@ -2731,26 +2725,19 @@ impl Storage {
 
     fn read_creator_hunt_window(env: &Env, creator: &Address) -> Option<CreatorDailyHuntCount> {
         let key = Self::creator_daily_count_key(creator);
+        env.storage().persistent().get(&key)
+    }
 
-        let stored: Option<CreatorDailyHuntCount> = env.storage().persistent().get(&key);
-
-        match stored {
+    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64) -> u32 {
+        match Self::read_creator_hunt_window(env, creator) {
             Some(entry) if entry.day == day => entry.count,
-
             _ => 0,
         }
-        active
     }
 
-    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, _day: u64) -> u32 {
-        Self::pruned_creator_hunt_timestamps(env, creator).len()
-    }
-
-    pub fn set_creator_daily_hunt_count(env: &Env, creator: &Address, _day: u64, count: u32) {
+    pub fn set_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64, count: u32) {
         let key = Self::creator_daily_count_key(creator);
-
         let entry = CreatorDailyHuntCount { day, count };
-
         env.storage().persistent().set(&key, &entry);
     }
 
@@ -2786,6 +2773,12 @@ impl Storage {
         }
 
         Vec::new(env)
+    }
+
+    pub fn set_co_creators(env: &Env, hunt_id: u64, list: &Vec<Address>) {
+        let key = Self::co_creators_key(hunt_id);
+        env.storage().persistent().set(&key, list);
+        extend_ttl(env, &key, TtlPolicy::Active);
     }
 
     pub fn add_co_creator(
