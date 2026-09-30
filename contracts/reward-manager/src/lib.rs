@@ -224,6 +224,14 @@ pub struct GlobalCapChangedEvent {
     pub admin: Address,
 }
 
+/// Event emitted when the configured HuntyCore contract is set or updated.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct HuntyCoreSetEvent {
+    pub old_core: Option<Address>,
+    pub new_core: Address,
+}
+
 /// Event emitted when the default NFT reward contract is set or updated.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -377,6 +385,7 @@ impl RewardManager {
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
         Storage::set_hunty_core(&env, &hunty_core);
+        Storage::add_authorized_contract(&env, &hunty_core);
         Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
     }
 
@@ -397,6 +406,7 @@ impl RewardManager {
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
         Storage::set_hunty_core(&env, &hunty_core);
+        Storage::add_authorized_contract(&env, &hunty_core);
         Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
         Ok(())
     }
@@ -501,10 +511,26 @@ impl RewardManager {
         hunty_core: Address,
     ) -> Result<(), RewardErrorCode> {
         Self::require_admin(&env, &admin)?;
+
+        let old_hunty_core = Storage::get_hunty_core(&env);
         Storage::set_hunty_core(&env, &hunty_core);
-        // The configured core is the trusted contract boundary for reward
-        // distribution; keep the distributor allowlist in sync automatically.
+
+        // Keep the distributor allowlist in sync with current trust boundary.
+        if let Some(old_core) = old_hunty_core.clone() {
+            if old_core != hunty_core {
+                Storage::remove_authorized_contract(&env, &old_core);
+            }
+        }
         Storage::add_authorized_contract(&env, &hunty_core);
+
+        env.events().publish(
+            (symbol_short!("HCORE_SET"),),
+            HuntyCoreSetEvent {
+                old_core: old_hunty_core,
+                new_core: hunty_core,
+            },
+        );
+
         Ok(())
     }
 

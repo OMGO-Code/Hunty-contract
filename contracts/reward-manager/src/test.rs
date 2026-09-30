@@ -9,7 +9,10 @@ mod test {
     use crate::errors::RewardErrorCode;
     use crate::storage::Storage;
     use crate::types::{DistributionMode, RankRewardTier, RewardConfig, RewardPoolConfig};
-    use crate::{BatchDistributionEntry, PoolDistribution, RewardManager, RewardsDistributedEvent};
+    use crate::{
+        BatchDistributionEntry, HuntyCoreSetEvent, PoolDistribution, RewardManager,
+        RewardsDistributedEvent,
+    };
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger as _;
@@ -4316,6 +4319,7 @@ mod test {
     fn test_event_topic_symbols_within_short_symbol_limit() {
         let topics = [
             symbol_short!("NFT_SET"),
+            symbol_short!("HCORE_SET"),
             symbol_short!("POOL_CRT"),
             symbol_short!("PL_TIERS"),
             symbol_short!("PL_RTIERS"),
@@ -4342,6 +4346,32 @@ mod test {
                 "event topic exceeds symbol_short! limit"
             );
         }
+    }
+
+    #[test]
+    fn test_set_hunty_core_removes_old_contract_and_emits_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let old_core = Address::generate(&env);
+        let new_core = Address::generate(&env);
+        let contract_id = env.register(RewardManager, ());
+        let client = RewardManagerClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &Address::generate(&env), &old_core);
+        Storage::add_authorized_contract(&env, &old_core);
+
+        client.set_hunty_core(&admin, &new_core);
+
+        assert!(!Storage::is_authorized_contract(&env, &old_core));
+        assert!(Storage::is_authorized_contract(&env, &new_core));
+
+        let event = find_event::<HuntyCoreSetEvent>(&env, symbol_short!("HCORE_SET"))
+            .expect("HuntyCore rotation event should be emitted");
+        let payload = event.1;
+        assert_eq!(payload.old_core, Some(old_core.clone()));
+        assert_eq!(payload.new_core, new_core);
     }
 
     // ========== Authorization Tests (Auth Bypass Fixes) ==========
