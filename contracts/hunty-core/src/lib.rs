@@ -98,6 +98,8 @@ mod tests {
 #[cfg(test)]
 mod difficulty_override_test;
 #[cfg(test)]
+mod incorrect_answer_outcome_test;
+#[cfg(test)]
 mod list_hunts_test;
 #[cfg(test)]
 #[path = "paused_status_test.rs"]
@@ -3028,7 +3030,8 @@ impl HuntyCore {
 
     /// This function verifies the submitted answer by hashing it and comparing
     /// with the stored answer hash. If correct, updates player progress and emits
-    /// success events. If incorrect, emits an analytics event and returns an error.
+    /// success events. If incorrect, records the failed attempt, emits an analytics
+    /// event and returns `Ok(false)`.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -3040,7 +3043,7 @@ impl HuntyCore {
     /// * `submitted_at` - Client timestamp captured when the submission was signed
     ///
     /// # Returns
-    /// `Ok(())` on successful answer verification and progress update
+    /// `Ok(true)` if the answer is correct, `Ok(false)` if it is incorrect
     ///
     /// # Errors
     /// * `HuntNotFound` - Hunt does not exist
@@ -3048,8 +3051,10 @@ impl HuntyCore {
     /// * `PlayerNotRegistered` - Player has not registered for this hunt
     /// * `ClueNotFound` - Clue does not exist in this hunt
     /// * `ClueAlreadyCompleted` - Player has already completed this clue
-    /// * `InvalidAnswer` - Submitted answer does not match the stored hash
+    /// * `InvalidAnswer` - The submitted answer is empty or exceeds the maximum length
     /// * `InvalidMaxAttempts` - Player has exhausted attempts for this clue
+    /// * `RateLimitExceeded` - Player exceeded the per-minute submission limit
+    /// * `AttemptCooldownNotExpired` - The per-clue attempt cooldown has not elapsed
     /// * `DuplicateSubmission` - Submission nonce/timestamp envelope was already processed
     /// * `SubmissionExpired` - Submission timestamp is too old or too far in the future
     ///
@@ -3162,6 +3167,19 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Applies the outcome of an evaluated answer.
+    ///
+    /// Returns `Ok(false)` for an incorrect answer and `Ok(true)` for a correct
+    /// one. A wrong answer must NOT be signalled with `Err`: a Soroban
+    /// invocation that returns an error rolls back every storage write and every
+    /// event it made, which would discard the attempt count, the per-clue
+    /// cooldown timestamp, the consumed submission nonce and the `AnswerIncorrect`
+    /// event. Returning `Ok(false)` commits all of them, so the per-minute rate
+    /// limit and the attempt cap actually bite instead of being reset by every
+    /// wrong guess. This matches `preview_answer`, which already reports an
+    /// incorrect answer as `Ok(false)`.
+    ///
+    /// `progress` is saved on both paths, so the caller must not save it again.
     #[allow(clippy::too_many_arguments)]
     fn finalize_answer_submission(
         env: &Env,
@@ -3173,13 +3191,9 @@ impl HuntyCore {
         clue_id: u32,
         current_time: u64,
         answer_correct: bool,
-        record_failed_submission: bool,
-    ) -> Result<(), HuntErrorCode> {
+    ) -> Result<bool, HuntErrorCode> {
         if !answer_correct {
             Storage::increment_clue_attempt_count(env, hunt_id, clue_id, player);
-            if record_failed_submission && hunt.max_submissions_per_minute > 0 {
-                progress.recent_submissions.push_back(current_time);
-            }
             Storage::save_player_progress(env, progress, hunt.activated_at);
             let incorrect_event = AnswerIncorrectEvent {
                 hunt_id,
@@ -3191,7 +3205,7 @@ impl HuntyCore {
                 (Symbol::new(env, "AnswerIncorrect"), hunt_id, clue_id),
                 incorrect_event,
             );
-            return Err(HuntErrorCode::InvalidAnswer);
+            return Ok(false);
         }
 
         let score = Self::calculate_score(hunt, clue, progress.started_at, current_time);
@@ -3245,9 +3259,18 @@ impl HuntyCore {
             clue_completed_event,
         );
 
-        Ok(())
+        Ok(true)
     }
 
+    /// Verifies a submitted answer, recording the attempt either way.
+    ///
+    /// # Returns
+    /// `Ok(true)` when the answer is correct, `Ok(false)` when it is wrong.
+    ///
+    /// An incorrect answer is reported as `Ok(false)` rather than
+    /// `Err(InvalidAnswer)` so that the failed attempt, the per-clue cooldown
+    /// timestamp and the consumed submission nonce are committed instead of
+    /// rolled back. See `finalize_answer_submission`.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_answer(
         env: Env,
@@ -3257,7 +3280,7 @@ impl HuntyCore {
         answer: String,
         submission_nonce: u64,
         submitted_at: u64,
-    ) -> Result<(), HuntErrorCode> {
+    ) -> Result<bool, HuntErrorCode> {
         // Require player authorization
         player.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -3371,12 +3394,13 @@ impl HuntyCore {
             clue_id,
             current_time,
             answer_correct,
-            false,
-        )?;
-
-        Ok(())
+        )
     }
 
+    /// Variant of `submit_answer` that accepts a precomputed SHA256 answer hash.
+    ///
+    /// Shares the incorrect-answer semantics of `submit_answer`: a wrong answer
+    /// returns `Ok(false)` and commits the failed attempt.
     pub fn submit_answer_with_hash(
         env: Env,
         hunt_id: u64,
@@ -3385,7 +3409,7 @@ impl HuntyCore {
         answer_hash: BytesN<32>,
         submission_nonce: u64,
         submitted_at: u64,
-    ) -> Result<(), HuntErrorCode> {
+    ) -> Result<bool, HuntErrorCode> {
         player.require_auth();
         Self::ensure_not_paused(&env)?;
 
@@ -3473,10 +3497,7 @@ impl HuntyCore {
             clue_id,
             current_time,
             answer_correct,
-            false,
-        )?;
-
-        Ok(())
+        )
     }
 
     #[allow(dead_code)]

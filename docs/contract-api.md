@@ -3698,7 +3698,8 @@ pub fn preview_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, ans
 
 This function verifies the submitted answer by hashing it and comparing
 with the stored answer hash. If correct, updates player progress and emits
-success events. If incorrect, emits an analytics event and returns an error.
+success events. If incorrect, records the failed attempt, emits an analytics
+event and returns `Ok(false)`.
 
 # Arguments
 * `env` - The Soroban environment
@@ -3710,7 +3711,14 @@ success events. If incorrect, emits an analytics event and returns an error.
 * `submitted_at` - Client timestamp captured when the submission was signed
 
 # Returns
-`Ok(())` on successful answer verification and progress update
+`Ok(true)` if the answer is correct, `Ok(false)` if it is incorrect
+
+> An incorrect answer resolves rather than rejecting. A Soroban invocation that
+> returns an error rolls back every storage write and event it made, which would
+> discard the attempt count, the per-clue cooldown timestamp, the consumed
+> submission nonce and the `AnswerIncorrect` event, letting a player brute-force
+> answers without ever hitting the rate limit or attempt cap. This matches
+> `preview_answer`, which already reports a wrong answer as `Ok(false)`.
 
 # Errors
 * `HuntNotFound` - Hunt does not exist
@@ -3718,8 +3726,10 @@ success events. If incorrect, emits an analytics event and returns an error.
 * `PlayerNotRegistered` - Player has not registered for this hunt
 * `ClueNotFound` - Clue does not exist in this hunt
 * `ClueAlreadyCompleted` - Player has already completed this clue
-* `InvalidAnswer` - Submitted answer does not match the stored hash
+* `InvalidAnswer` - The submitted answer is empty or exceeds the maximum length
 * `InvalidMaxAttempts` - Player has exhausted attempts for this clue
+* `RateLimitExceeded` - Player exceeded the per-minute submission limit
+* `AttemptCooldownNotExpired` - The per-clue attempt cooldown has not elapsed
 * `DuplicateSubmission` - Submission nonce/timestamp envelope was already processed
 * `SubmissionExpired` - Submission timestamp is too old or too far in the future
 
@@ -3734,7 +3744,7 @@ teammates see it as already solved and share the earned score.
 **Signature:**
 
 ```rust
-pub fn submit_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, answer: String, submission_nonce: u64, submitted_at: u64) -> Result<(), HuntErrorCode>
+pub fn submit_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, answer: String, submission_nonce: u64, submitted_at: u64) -> Result<bool, HuntErrorCode>
 ```
 
 **Parameters:**
@@ -3812,7 +3822,7 @@ pub fn submit_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, answ
 **Signature:**
 
 ```rust
-pub fn submit_answer_with_hash(env: Env, hunt_id: u64, clue_id: u32, player: Address, answer_hash: BytesN<32>, submission_nonce: u64, submitted_at: u64) -> Result<(), HuntErrorCode>
+pub fn submit_answer_with_hash(env: Env, hunt_id: u64, clue_id: u32, player: Address, answer_hash: BytesN<32>, submission_nonce: u64, submitted_at: u64) -> Result<bool, HuntErrorCode>
 ```
 
 **Parameters:**
