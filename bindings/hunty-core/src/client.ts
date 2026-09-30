@@ -254,8 +254,12 @@ export interface Client {
 
   /**
    * Construct and simulate a submit_answer transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Resolves to `true` when the answer is correct and `false` when it is wrong.
+   * A wrong answer resolves rather than rejecting, so the recorded attempt, the
+   * per-clue cooldown and the consumed submission nonce are committed instead of
+   * rolled back. Rate-limit, attempt-cap and cooldown violations still reject.
    */
-  submit_answer: ({hunt_id, clue_id, player, answer, submission_nonce, submitted_at}: {hunt_id: u64, clue_id: u32, player: string, answer: string, submission_nonce: u64, submitted_at: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  submit_answer: ({hunt_id, clue_id, player, answer, submission_nonce, submitted_at}: {hunt_id: u64, clue_id: u32, player: string, answer: string, submission_nonce: u64, submitted_at: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<boolean>>>
 
   /**
    * Construct and simulate a add_co_creator transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -634,8 +638,10 @@ export interface Client {
    * This avoids on-chain normalization and hashing when the client supplies
    * the correctly computed `answer_hash = SHA256(hunt_id || clue_id || normalized_answer)`.
    * Use this from off-chain callers that can perform normalization+hashing cheaply.
+   * Resolves to `true` when the answer is correct and `false` when it is wrong,
+   * matching `submit_answer`.
    */
-  submit_answer_with_hash: ({hunt_id, clue_id, player, answer_hash, submission_nonce, submitted_at}: {hunt_id: u64, clue_id: u32, player: string, answer_hash: Buffer, submission_nonce: u64, submitted_at: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  submit_answer_with_hash: ({hunt_id, clue_id, player, answer_hash, submission_nonce, submitted_at}: {hunt_id: u64, clue_id: u32, player: string, answer_hash: Buffer, submission_nonce: u64, submitted_at: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<boolean>>>
 
   /**
    * Construct and simulate a update_hunt_description transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -849,7 +855,7 @@ export class Client extends ContractClient {
         pause_rewards: this.txFromJSON<Result<void>>,
         run_migration: this.txFromJSON<Result<MigrationReport>>,
         set_clue_hint: this.txFromJSON<Result<void>>,
-        submit_answer: this.txFromJSON<Result<void>>,
+        submit_answer: this.txFromJSON<Result<boolean>>,
         add_co_creator: this.txFromJSON<Result<void>>,
         get_hunt_count: this.txFromJSON<u64>,
         is_blacklisted: this.txFromJSON<boolean>,
@@ -896,7 +902,7 @@ export class Client extends ContractClient {
         unpause_registrations: this.txFromJSON<Result<void>>,
         remove_global_view_only: this.txFromJSON<Result<void>>,
         remove_view_only_access: this.txFromJSON<Result<void>>,
-        submit_answer_with_hash: this.txFromJSON<Result<void>>,
+        submit_answer_with_hash: this.txFromJSON<Result<boolean>>,
         update_hunt_description: this.txFromJSON<Result<void>>,
         get_global_view_only_list: this.txFromJSON<Array<string>>,
         get_hunt_leaderboard_window: this.txFromJSON<Result<LeaderboardWindow>>,

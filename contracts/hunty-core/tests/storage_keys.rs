@@ -26,8 +26,10 @@ fn test_single_rate_limit_storage_entry_across_days() {
         assert!(entry.is_some());
         let entry = entry.unwrap();
 
-        let expected_day = day3 / SECONDS_PER_DAY;
-        assert_eq!(entry.day, expected_day);
-        assert_eq!(entry.count, 1);
+        // A single namespaced entry holds the rolling window of creation timestamps:
+        // day0 falls outside the 24h window at day3, while day2 and day3 remain.
+        assert_eq!(entry.timestamps.len(), 2);
+        assert_eq!(entry.timestamps.get(0), Some(day2));
+        assert_eq!(entry.timestamps.get(1), Some(day3));
     });
 }

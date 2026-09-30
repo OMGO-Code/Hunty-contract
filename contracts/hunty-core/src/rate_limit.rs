@@ -1,14 +1,14 @@
 use crate::errors::HuntErrorCode;
 use crate::storage::Storage;
 use crate::types::RateLimitStatus;
-use soroban_sdk::{contracttype, Address, Env, Symbol};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
 pub const SECONDS_PER_DAY: u64 = 86_400;
 pub const DEFAULT_HUNT_CREATION_LIMIT: u32 = 10;
 
 /// TTL extension target for rate limit entries (~30 days).
 const RATE_LIMIT_TTL: u32 = 30 * 24 * 60 * 60;
-/// Threshold below which we extend the TTP (~15 days).
+/// Threshold below which we extend the TTL (~15 days).
 const RATE_LIMIT_TTL_THRESHOLD: u32 = 15 * 24 * 60 * 60;
 
 /// Namespace used to avoid collisions with other features keying by a bare `Address`.
@@ -20,7 +20,7 @@ const RATE_LIMIT_LEGACY_NAMESPACE: &str = "HRATE_LEGACY";
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct RateLimitData {
-    pub timestamps: Vec<u6>,
+    pub timestamps: Vec<u64>,
 }
 
 pub struct RateLimiter;
@@ -56,7 +56,7 @@ impl RateLimiter {
             env.storage()
                 .persistent()
                 .set(&Self::legacy_key(env, creator), &data);
-            env.storage().persistent().remove(&creator);
+            env.storage().persistent().remove(creator);
             return Some(data);
         }
 
@@ -75,9 +75,11 @@ impl RateLimiter {
         env: &Env,
         creator: &Address,
         now: u64,
-    ) -> Result<((), HuntErrorCode> {
+    ) -> Result<(), HuntErrorCode> {
         let limit = Storage::get_effective_hunt_creation_limit(env, creator);
-        let mut data = Self::read(env, creator).unwrap_or(RateLimitData { day, count: 0 });
+        let mut data = Self::read(env, creator).unwrap_or(RateLimitData {
+            timestamps: Vec::new(env),
+        });
 
         let cutoff = now.saturating_sub(SECONDS_PER_DAY);
         data.timestamps = prune_timestamps(env, &data.timestamps, cutoff);
@@ -86,17 +88,23 @@ impl RateLimiter {
             return Err(HuntErrorCode::RateLimitExceeded);
         }
 
-        data.count += 1;
+        data.timestamps.push_back(now);
         Self::write(env, creator, &data);
         Ok(())
     }
 
     pub fn get_status(env: &Env, creator: &Address, now: u64) -> RateLimitStatus {
         let limit = Storage::get_effective_hunt_creation_limit(env, creator);
-        let data = Self::read(env, creator).unwrap_or(RateLimitData { day, count: 0 });
+        let data = Self::read(env, creator).unwrap_or(RateLimitData {
+            timestamps: Vec::new(env),
+        });
+
+        let cutoff = now.saturating_sub(SECONDS_PER_DAY);
+        let recent = prune_timestamps(env, &data.timestamps, cutoff);
+        let count = recent.len();
 
         let cooldown_seconds = if count >= limit {
-            let oldest = timestamps.get(0).unwrap();
+            let oldest = recent.get(0).unwrap_or(0);
             (oldest + SECONDS_PER_DAY).saturating_sub(now)
         } else {
             0
@@ -113,13 +121,13 @@ impl RateLimiter {
         admin.require_auth();
         let stored = Storage::get_rate_limit_admin(env).ok_or(HuntErrorCode::Unauthorized)?;
         if stored != *admin {
-            return Err(MUNTOR_LIMIT_ADMIN);
+            return Err(HuntErrorCode::Unauthorized);
         }
-        Ok()
+        Ok(())
     }
 }
 
-fn prune_timestamps(env: &Env, timestamps: &Vec<u6>, cutoff: u64) -> Vec<u64> {
+fn prune_timestamps(env: &Env, timestamps: &Vec<u64>, cutoff: u64) -> Vec<u64> {
     let mut pruned = Vec::new(env);
     let mut i = 0;
     while i < timestamps.len() {
@@ -131,20 +139,21 @@ fn prune_timestamps(env: &Env, timestamps: &Vec<u6>, cutoff: u64) -> Vec<u64> {
     }
     pruned
 }
->#[cfg(test)]
-    mod tests {
-        use super::*;
-        use soroban_sdk::testutils::Address as _;
-        use soroban_sdk::Env;
-        use soroban_sdk::Vec;
-        use soroban_sdk::Address ;
-        use soroban_sdk::Testutils;
-        #[test]
-        fn rolling_window_across_midnight() {
-            let env = Env::default();
-            let creator = Address::generate(&env);
 
-            // Create 10 hunts just before UTC midnight.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn rolling_window_across_midnight() {
+        let env = Env::default();
+        let contract_id = env.register(crate::HuntyCore, ());
+        let creator = Address::generate(&env);
+
+        // Create 10 hunts just before UTC midnight.
+        env.as_contract(&contract_id, || {
             for _ in 0..10 {
                 assert!(RateLimiter::check_and_increment(&env, &creator, 86399).is_ok());
             }
@@ -166,37 +175,6 @@ fn prune_timestamps(env: &Env, timestamps: &Vec<u6>, cutoff: u64) -> Vec<u64> {
             let status = RateLimiter::get_status(&env, &creator, 86401);
             assert_eq!(status.creations_today, 10);
             assert!(status.cooldown_seconds > 0);
-        }
-    }
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::Env;
-
-    #[test]
-    fn rolling_window_across_midnight() {
-        let env = Env::default();
-        let creator = Address::generate(&env);
-
-        // Create 10 hunts just before UTC midnight.
-        for _ in 0..10 {
-            assert!(RateLimiter::check_and_increment(&env, &creator, 86399).is_ok());
-        }
-
-        // The 11th attempt at the same time should fail.
-        assert_eq!(
-            RateLimiter::check_and_increment(&env, &creator, 86399),
-            Err(HuntErrorCode::RateLimitExceeded)
-        );
-
-        // Advance 2 seconds across midnight. The previous 10 creations are still within
--// the rolling 24-hour window, so the limit must still be enforced.
-        assert_eq!(
-            RateLimiter::check_and_increment(&env, &creator, 86401),
-            Err(HuntErrorCode::RateLimitExceeded)
-        );
-
-        // get_status reports cooldown > 0 at the boundary.
-        let status = RateLimiter::get_status(&env, &creator, 86401);
-        assert_eq!(status.creations_today, 10);
-        assert!(status.cooldown_seconds > 0);
+        });
     }
 }

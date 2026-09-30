@@ -40,18 +40,17 @@
                 "map": [
                   {
                     "key": {
-                      "symbol": "count"
+                      "symbol": "timestamps"
                     },
                     "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "day"
-                    },
-                    "val": {
-                      "u64": "2"
+                      "vec": [
+                        {
+                          "u64": "86400"
+                        },
+                        {
+                          "u64": "172800"
+                        }
+                      ]
                     }
                   }
                 ]
