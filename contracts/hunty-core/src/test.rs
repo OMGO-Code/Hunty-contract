@@ -12843,3 +12843,31 @@ mod test {
         );
     }
 }
+
+#[test]
+fn bench_save_progress_500_players() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // ⬇ copy the setup (client, creator, hunt_id, activate hunt) from an existing test
+    let (client, hunt_id) = setup_active_hunt(&env);
+
+    let mut players = std::vec::Vec::new();
+    for _ in 0..500 {
+        let p = Address::generate(&env);
+        client.register_player(&hunt_id, &p);
+        players.push(p);
+    }
+
+    // Measure ONE progress save for the last-registered player (worst case for the old scan)
+    let last = players.last().unwrap();
+    env.cost_estimate().budget().reset_default();
+    // ⬇ use whichever call triggers save_player_progress in your tests
+    client.submit_answer(&hunt_id, &1u32, last, &String::from_str(&env, "answer"));
+    let cpu = env.cost_estimate().budget().cpu_instruction_cost();
+
+    std::println!("cpu instructions for 1 save with 500 players: {}", cpu);
+
+    // Compare against a 1-player baseline so the test proves it is not O(n)
+    // (or use a generous fixed ceiling, tuned after your first run)
+    assert!(cpu < 5_000_000, "save_player_progress scales with player count: {}", cpu);
+}
