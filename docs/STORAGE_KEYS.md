@@ -268,6 +268,7 @@ Historical longer prefixes that were shortened (see ADR 002):
 | `ROLLBACK_KEY` | `RBKVER` | rollback / previous version marker |
 | `PROPOSAL_KEY` | `UPROP` | pending upgrade proposal |
 | `TIMELOCK_KEY` | `UPTLK` | upgrade timelock |
+| `TIMELOCK_PENDING_KEY` | `UPTLDP` | queued timelock reduction (applies at `effective_at`) |
 | `HIST_COUNT_KEY` | `UPHCT` | upgrade history count |
 | `UPGRADE_ADMIN_KEY` | `UPADM` | upgrade admin |
 
