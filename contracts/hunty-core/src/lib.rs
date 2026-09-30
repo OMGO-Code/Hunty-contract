@@ -100,6 +100,8 @@ mod difficulty_override_test;
 #[cfg(test)]
 mod incorrect_answer_outcome_test;
 #[cfg(test)]
+mod invite_registration_deadline_test;
+#[cfg(test)]
 mod list_hunts_test;
 #[cfg(test)]
 #[path = "paused_status_test.rs"]
@@ -1116,7 +1118,7 @@ impl HuntyCore {
             let hunt_id = current + 1;
             if let Some(hunt) = Storage::get_hunt(&env, hunt_id) {
                 if hunt.status != HuntStatus::Archived {
-                    hunts.push_back(hunt);
+                    hunts.push_back(Storage::sanitize_hunt_for_public(&hunt));
                 }
             }
             current += 1;
@@ -1147,7 +1149,7 @@ impl HuntyCore {
                 if hunt.status != HuntStatus::Archived
                     && Self::title_contains(&hunt.title, &title_substring)
                 {
-                    hunts.push_back(hunt);
+                    hunts.push_back(Storage::sanitize_hunt_for_public(&hunt));
                 }
             }
             current += 1;
@@ -1206,7 +1208,7 @@ impl HuntyCore {
             if let Some(hunt) = Storage::get_hunt(&env, hunt_id) {
                 if hunt.status != HuntStatus::Archived && Self::hunt_has_category(&hunt, &category)
                 {
-                    hunts.push_back(hunt);
+                    hunts.push_back(Storage::sanitize_hunt_for_public(&hunt));
                 }
             }
             current += 1;
@@ -1677,7 +1679,9 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
 
-        // Validation passed — load full hunt from persistent for mutation
+        // Validation passed — load full hunt from persistent for mutation.
+        // The invite-code hash is needed below to refuse activating a private
+        // hunt that nobody could ever join.
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let old_status = hunt.status.clone();
 
@@ -2154,7 +2158,11 @@ impl HuntyCore {
         // EmergencyStopped, Archived); there is no per-status gating to apply
         // for a read-only getter, so the previous exhaustive-but-empty match
         // over `hunt.status` was dead code and has been removed.
-        Ok(hunt)
+        //
+        // The invite-code hash is stripped: it is salted only with the public
+        // hunt_id, so returning it would let anyone brute-force short
+        // human-chosen invite codes offline.
+        Ok(Storage::sanitize_hunt_for_public(&hunt))
     }
 
     /// Sets the reward configuration for a hunt.
@@ -2543,6 +2551,24 @@ impl HuntyCore {
     /// * `InvalidHuntStatus` - Hunt is not in Active status
     /// * `HuntNotActive` - Hunt has ended (past end_time)
     /// * `DuplicateRegistration` - Player is already registered for this hunt
+    /// Enforces `hunt.registration_deadline`, if the creator configured one.
+    ///
+    /// A deadline of `0` means "no deadline". The boundary is exclusive:
+    /// registration is accepted through `deadline - 1` and refused from
+    /// `deadline` onward.
+    ///
+    /// Shared by public and invite registration so a private hunt cannot be
+    /// joined after its deadline while a public one is correctly refused.
+    fn ensure_registration_deadline_not_passed(
+        hunt: &Hunt,
+        current_time: u64,
+    ) -> Result<(), HuntErrorCode> {
+        if hunt.registration_deadline != 0 && current_time >= hunt.registration_deadline {
+            return Err(HuntErrorCode::RegistrationsPaused);
+        }
+        Ok(())
+    }
+
     pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
         player.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -2576,9 +2602,7 @@ impl HuntyCore {
         let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
 
         // Enforce the registration deadline if the creator configured one
-        if hunt.registration_deadline != 0 && current_time >= hunt.registration_deadline {
-            return Err(HuntErrorCode::RegistrationsPaused);
-        }
+        Self::ensure_registration_deadline_not_passed(&hunt, current_time)?;
 
         // Single duplicate-registration check: reject a player who is already
         // registered for this hunt in the current activation cycle. Progress
@@ -2865,6 +2889,7 @@ impl HuntyCore {
             return Err(HuntErrorCode::RegistrationsPaused);
         }
 
+        // The invite-code hash is required below to verify the caller's code.
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         // Invitation registration follows the same explicit Paused gate as
@@ -2879,8 +2904,11 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
+        // Clone rather than move: `hunt` is still needed below for the
+        // start-time, registration-deadline and max_players checks.
         let stored_hash = hunt
             .invite_code_hash
+            .clone()
             .ok_or(HuntErrorCode::InvalidHuntStatus)?;
 
         // Hash the provided invite code with the same salt (hunt_id) and compare.
@@ -2909,6 +2937,11 @@ impl HuntyCore {
 
         // Cache read: cheaper than loading full Hunt from persistent storage
         let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
+
+        // Enforce the registration deadline. A valid invite does not exempt a
+        // player from the deadline the creator set for the hunt, so this is the
+        // same check register_player applies.
+        Self::ensure_registration_deadline_not_passed(&hunt, current_time)?;
 
         if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
             return Err(HuntErrorCode::DuplicateRegistration);

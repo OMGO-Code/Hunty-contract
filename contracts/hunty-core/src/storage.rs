@@ -369,6 +369,17 @@ impl Storage {
 
     /// * `Some(Hunt)` if the hunt exists, `None` otherwise
 
+    ///
+    /// Returns the record with `invite_code_hash` intact. This is
+    /// contract-internal state: the hash is salted only with the public hunt_id,
+    /// so exposing it would let anyone brute-force short human-chosen invite
+    /// codes offline. Public entrypoints returning a `Hunt` must call
+    /// `sanitize_hunt_for_public` on the result.
+    ///
+    /// The hash is deliberately not stripped here. Most setters read-modify-write
+    /// the whole `Hunt`; clearing it on read would silently drop the configured
+    /// invite code on any unrelated field update, leaving a private hunt that no
+    /// one can join.
     pub fn get_hunt(env: &Env, hunt_id: u64) -> Option<Hunt> {
         let key = Self::hunt_key(hunt_id);
 
@@ -548,13 +559,6 @@ impl Storage {
             } else {
                 hunt.max_players.saturating_sub(count)
             };
-
-            // Never expose the invite code hash through public getters.
-            // The hash is salted only with the public hunt_id, so returning
-            // it would let anyone brute-force short human-chosen invite
-            // codes offline. Callers that need to verify a code must go
-            // through the on-chain `join_private_hunt` entry point.
-            hunt.invite_code_hash = None;
         }
 
         result
