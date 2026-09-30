@@ -710,7 +710,7 @@ fn test_rate_limit_single_storage_entry_across_days() {
     }
 
     as_core_contract(&env, &core_id, |env| {
-        // The fixed rate-limit layout uses a single key per creator.
+        // Old per-day instance keys must not exist.
         let old_day_keys = [
             env.storage().instance().has(&(creator.clone(), days[0])),
             env.storage().instance().has(&(creator.clone(), days[1])),
@@ -718,20 +718,31 @@ fn test_rate_limit_single_storage_entry_across_days() {
         ];
         assert_eq!(old_day_keys, [false, false, false]);
 
-        let (stored_day, count): (u64, u32) = env
-            .storage()
-            .instance()
-            .get(&creator)
-            .expect("creator rate-limit entry should exist");
-        assert_eq!(stored_day, days[2] / day_length);
-        assert_eq!(count, 1);
+        // The bare Address key in instance storage must not exist either —
+        // RateLimiter writes to persistent storage under (Symbol("HRATE"), Address).
+        assert!(
+            !env.storage().instance().has(&creator),
+            "rate-limit must not be stored in instance storage"
+        );
 
-        let known_entry_count = old_day_keys.iter().filter(|exists| **exists).count()
-            + if env.storage().instance().has(&creator) {
-                1
-            } else {
-                0
-            };
-        assert_eq!(known_entry_count, 1);
+        // Exactly one entry exists: the namespaced persistent key.
+        let namespaced_key = (
+            soroban_sdk::Symbol::new(env, "HRATE"),
+            creator.clone(),
+        );
+        assert!(
+            env.storage().persistent().has(&namespaced_key),
+            "rate-limit entry must exist under (HRATE, Address) in persistent storage"
+        );
+
+        // Verify it holds the correct day and count (one hunt created on day 3).
+        use hunty_core::rate_limit::RateLimitData;
+        let entry: RateLimitData = env
+            .storage()
+            .persistent()
+            .get(&namespaced_key)
+            .expect("rate-limit entry should exist");
+        assert_eq!(entry.day, days[2] / day_length);
+        assert_eq!(entry.count, 1);
     });
 }
