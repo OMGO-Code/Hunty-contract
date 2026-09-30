@@ -25,13 +25,13 @@ fn setup() -> (Env, Address) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(RewardManager, ());
+    // `RewardManager` initializes through its 3-argument `__constructor`
+    // (admin, xlm_token, hunty_core); registering with no arguments panics
+    // before any tier setter can run.
     let admin = Address::generate(&env);
     let xlm_token = Address::generate(&env);
     let hunty_core = Address::generate(&env);
-    env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin, xlm_token, hunty_core).unwrap();
-    });
+    let contract_id = env.register(RewardManager, (admin, xlm_token, hunty_core));
 
     (env, contract_id)
 }
@@ -82,6 +82,51 @@ fn rank_tiers(env: &Env, count: u32) -> Vec<RankRewardTier> {
         });
     }
     tiers
+}
+
+#[test]
+fn cap_is_twenty_entries() {
+    // Pin the chosen limit so the documented cap (and the per-distribution
+    // config read cost it bounds) cannot silently drift.
+    assert_eq!(MAX_TIER_ENTRIES, 20);
+}
+
+#[test]
+fn lists_just_below_cap_are_accepted() {
+    let (env, contract_id) = setup();
+    let creator = Address::generate(&env);
+    let hunt_id = 70;
+    seed_config(&env, &contract_id, &creator, hunt_id);
+
+    // `MAX_TIER_ENTRIES - 1` is the last "safely under the bound" size for both
+    // tier kinds; it must be accepted and persisted verbatim.
+    env.as_contract(&contract_id, || {
+        RewardManager::set_pool_tiers(
+            env.clone(),
+            creator.clone(),
+            hunt_id,
+            time_tiers(&env, MAX_TIER_ENTRIES - 1),
+        )
+        .unwrap();
+    });
+    let stored = env.as_contract(&contract_id, || {
+        Storage::get_pool_config(&env, hunt_id).unwrap()
+    });
+    assert_eq!(stored.time_based_tiers.len(), MAX_TIER_ENTRIES - 1);
+
+    env.as_contract(&contract_id, || {
+        RewardManager::set_pool_rank_tiers(
+            env.clone(),
+            creator.clone(),
+            hunt_id,
+            rank_tiers(&env, MAX_TIER_ENTRIES - 1),
+        )
+        .unwrap();
+    });
+    let stored = env.as_contract(&contract_id, || {
+        Storage::get_pool_config(&env, hunt_id).unwrap()
+    });
+    assert_eq!(stored.rank_based_tiers.len(), MAX_TIER_ENTRIES - 1);
 }
 
 #[test]
