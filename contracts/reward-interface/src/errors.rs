@@ -47,4 +47,10 @@ pub enum RewardErrorCode {
     DistributionPaused = 2038,
     TooManyFunders = 2039,
     InvalidHuntStatus = 2040,
+
+    /// Payout settings (tiers, NFT contract, distribution mode, vesting) can
+    /// only be changed while the hunt is still a Draft. Once the hunt is Active
+    /// (or in any other non-Draft state), this error is returned to prevent
+    /// a creator from altering rewards after players have already competed.
+    HuntLocked = 2043,
 }
