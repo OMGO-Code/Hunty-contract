@@ -1857,6 +1857,18 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
+        // #1037: Flip the hunt to `Cancelled` *before* asking the RewardManager
+        // for the refund. `RewardManager::refund_pool` only pays the pool back
+        // when HuntyCore reports the hunt as terminal (`is_hunt_terminal`,
+        // which is derived from `get_hunt_info`), so requesting the refund while
+        // the hunt is still Active/Paused is always rejected with
+        // `InvalidHuntStatus` and cancelling any funded hunt fails with
+        // `RefundFailed`. Persisting first is what keeps that gate satisfied.
+        // The whole call still reverts if the refund fails, so a rejected
+        // refund can never leave the hunt Cancelled with its pool still funded.
+        hunt.status = HuntStatus::Cancelled;
+        Storage::save_hunt(&env, &hunt);
+
         // Handle refunds for any remaining funded reward pool balance.
         if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
             let mut balance_args: Vec<Val> = Vec::new(&env);
@@ -1884,12 +1896,6 @@ impl HuntyCore {
                 }
             }
         }
-
-        // Cancel hunt
-        hunt.status = HuntStatus::Cancelled;
-
-        // Persist
-        Storage::save_hunt(&env, &hunt);
 
         // Emit event
         let event = HuntCancelledEvent { hunt_id };

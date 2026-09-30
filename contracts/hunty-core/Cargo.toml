@@ -29,6 +29,13 @@ required-features = ["stale-integration-tests"]
 name = "storage_keys"
 path = "tests/storage_keys.rs"
 
+# Regression test for #1037 (cancel_hunt must refund a funded pool). Unlike the
+# targets below it compiles against `main`, so it is not gated behind
+# `stale-integration-tests`.
+[[test]]
+name = "cancel_hunt_refund"
+path = "tests/cancel_hunt_refund.rs"
+
 [[test]]
 name = "issue_features"
 path = "tests/issue_features.rs"
