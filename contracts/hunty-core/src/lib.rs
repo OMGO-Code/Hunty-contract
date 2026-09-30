@@ -104,6 +104,8 @@ mod list_hunts_test;
 #[cfg(test)]
 #[path = "paused_status_test.rs"]
 mod paused_status_test;
+#[cfg(test)]
+mod submission_recording_test;
 // Regression tests for #1011-#1014 (admin persistence, reward-config auth,
 // global pause checks, duplicate registration).
 #[cfg(test)]
@@ -2985,24 +2987,7 @@ impl HuntyCore {
             current_time,
         )?;
 
-        if hunt.max_submissions_per_minute > 0 {
-            let mut updated_submissions = Vec::new(&env);
-            for i in 0..progress.recent_submissions.len() {
-                let ts = progress
-                    .recent_submissions
-                    .get(i)
-                    .ok_or(HuntErrorCode::CorruptPlayerProgress)?;
-                if current_time < ts + 60 {
-                    updated_submissions.push_back(ts);
-                }
-            }
-            progress.recent_submissions = updated_submissions;
-
-            if progress.recent_submissions.len() >= hunt.max_submissions_per_minute {
-                return Err(HuntErrorCode::RateLimitExceeded);
-            }
-            progress.recent_submissions.push_back(current_time);
-        }
+        Self::record_submission_for_rate_limit(&env, &hunt, &mut progress, current_time)?;
 
         Storage::save_player_progress(&env, &progress, hunt.activated_at);
 
@@ -3164,6 +3149,49 @@ impl HuntyCore {
         {
             return Err(HuntErrorCode::InvalidMaxAttempts);
         }
+        Ok(())
+    }
+
+    /// The single place where an answer submission is recorded in
+    /// `progress.recent_submissions`.
+    ///
+    /// Prunes timestamps that have aged out of the 60-second window, refuses the
+    /// submission when the window is already full, and otherwise appends
+    /// `current_time` exactly once. A `max_submissions_per_minute` of
+    /// `UNLIMITED_SUBMISSIONS_PER_MINUTE` (0) disables tracking entirely.
+    ///
+    /// Every entrypoint that consumes a submission — `submit_answer`,
+    /// `submit_answer_with_hash` and `preview_answer` — must go through here.
+    /// Recording in a caller as well would write two timestamps for one
+    /// submission, which silently halves the effective rate limit.
+    fn record_submission_for_rate_limit(
+        env: &Env,
+        hunt: &Hunt,
+        progress: &mut PlayerProgress,
+        current_time: u64,
+    ) -> Result<(), HuntErrorCode> {
+        if hunt.max_submissions_per_minute == UNLIMITED_SUBMISSIONS_PER_MINUTE {
+            return Ok(());
+        }
+
+        let mut in_window = Vec::new(env);
+        for i in 0..progress.recent_submissions.len() {
+            // Stored state may be inconsistent — return a typed error instead of aborting.
+            let ts = progress
+                .recent_submissions
+                .get(i)
+                .ok_or(HuntErrorCode::CorruptPlayerProgress)?;
+            if current_time < ts + 60 {
+                in_window.push_back(ts);
+            }
+        }
+        progress.recent_submissions = in_window;
+
+        if progress.recent_submissions.len() >= hunt.max_submissions_per_minute {
+            return Err(HuntErrorCode::RateLimitExceeded);
+        }
+
+        progress.recent_submissions.push_back(current_time);
         Ok(())
     }
 
@@ -3341,32 +3369,7 @@ impl HuntyCore {
             current_time,
         )?;
 
-        if hunt.max_submissions_per_minute > 0 {
-            let mut updated_submissions = Vec::new(&env);
-            for i in 0..progress.recent_submissions.len() {
-                // Stored state may be inconsistent — return a typed error instead of aborting.
-                let ts = progress
-                    .recent_submissions
-                    .get(i)
-                    .ok_or(HuntErrorCode::CorruptPlayerProgress)?;
-                if current_time < ts + 60 {
-                    updated_submissions.push_back(ts);
-                }
-            }
-            progress.recent_submissions = updated_submissions;
-
-            if progress.recent_submissions.len() >= hunt.max_submissions_per_minute {
-                // Stored state may be inconsistent — return a typed error instead of aborting.
-                let oldest_ts = progress
-                    .recent_submissions
-                    .get(0)
-                    .ok_or(HuntErrorCode::CorruptPlayerProgress)?;
-                let elapsed = current_time.saturating_sub(oldest_ts);
-                let _cooldown_remaining = 60u64.saturating_sub(elapsed);
-                return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
-            }
-            progress.recent_submissions.push_back(current_time);
-        }
+        Self::record_submission_for_rate_limit(&env, &hunt, &mut progress, current_time)?;
 
         // All validation passed — mark the nonce as consumed so the same envelope cannot be
         // replayed, then proceed to answer evaluation.
@@ -3458,23 +3461,7 @@ impl HuntyCore {
             current_time,
         )?;
 
-        if hunt.max_submissions_per_minute > 0 {
-            let mut updated_submissions = Vec::new(&env);
-            for i in 0..progress.recent_submissions.len() {
-                let ts = progress
-                    .recent_submissions
-                    .get(i)
-                    .ok_or(HuntErrorCode::CorruptPlayerProgress)?;
-                if current_time < ts + 60 {
-                    updated_submissions.push_back(ts);
-                }
-            }
-            progress.recent_submissions = updated_submissions;
-            if progress.recent_submissions.len() >= hunt.max_submissions_per_minute {
-                return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
-            }
-            progress.recent_submissions.push_back(current_time);
-        }
+        Self::record_submission_for_rate_limit(&env, &hunt, &mut progress, current_time)?;
 
         Storage::save_processed_submission(
             &env,
