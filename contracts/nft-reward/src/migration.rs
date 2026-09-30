@@ -36,10 +36,14 @@ impl NftRewardMigration {
             UpgradeAuthorization::get_upgrade_admin(env),
         )?;
         let now = env.ledger().timestamp();
-        let proposal = UpgradeAuthorization::propose_upgrade(env, admin, target_version, now);
-        Ok(proposal)
+        UpgradeAuthorization::propose_upgrade(env, admin, target_version, now)
     }
 
+    /// Sets the upgrade timelock to `delay_seconds`.
+    ///
+    /// Rejects values below `MIN_UPGRADE_TIMELOCK_SECONDS` (24 hours). Timelock
+    /// reductions only take effect after the current timelock elapses, so users
+    /// keep the warning window they were promised.
     pub fn set_upgrade_timelock(
         env: &Env,
         admin: &Address,
@@ -50,8 +54,8 @@ impl NftRewardMigration {
             admin,
             UpgradeAuthorization::get_upgrade_admin(env),
         )?;
-        UpgradeAuthorization::set_timelock_seconds(env, delay_seconds);
-        Ok(())
+        let now = env.ledger().timestamp();
+        UpgradeAuthorization::set_timelock_seconds(env, now, delay_seconds)
     }
 
     pub fn get_upgrade_proposal(env: &Env) -> Option<UpgradeProposal> {
@@ -60,6 +64,12 @@ impl NftRewardMigration {
 
     pub fn get_upgrade_timelock(env: &Env) -> u64 {
         UpgradeAuthorization::get_timelock_seconds(env)
+    }
+
+    /// Returns the pending timelock reduction, if one is queued.
+    #[allow(dead_code)]
+    pub fn get_pending_timelock_change(env: &Env) -> Option<hunty_migration::TimelockChange> {
+        UpgradeAuthorization::get_pending_timelock_change(env)
     }
 
     pub fn get_upgrade_history(
