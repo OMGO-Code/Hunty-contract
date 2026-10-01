@@ -1489,6 +1489,19 @@ impl RewardManager {
     /// * **Both pools must have the same creator**, who must authorize the call.
     /// * **Both pools must use the same token.**
     ///
+    /// # Accounting
+    /// After a successful migration the following identities hold:
+    ///
+    /// **Source pool:**
+    /// `total_deposited == balance(0) + total_distributed + total_refunded + total_migrated_out`
+    ///
+    /// **Destination pool:**
+    /// `total_deposited == balance + total_distributed + total_refunded + total_migrated_out(0)`
+    ///
+    /// `total_migrated_out` on the source is incremented by the migrated
+    /// amount so that `get_reward_pool` on the source never shows funds that
+    /// have "disappeared" without explanation.
+    ///
     /// # Arguments
     /// * `creator` - The shared creator of both pools (must authorize the call)
     /// * `source_hunt_id` - The expired/cancelled hunt to drain
@@ -1574,6 +1587,17 @@ impl RewardManager {
         Storage::set_pool_balance(&env, source_hunt_id, 0);
         Storage::set_pool_balance(&env, dest_hunt_id, new_dest_balance);
 
+        // Record the migrated amount on the source so the accounting identity
+        // `total_deposited == balance + total_distributed + total_refunded + total_migrated_out`
+        // remains true for the source pool. Without this, `get_reward_pool` on
+        // the source shows funds that vanished with no explanation.
+        let prev_migrated_out = Storage::get_pool_total_migrated_out(&env, source_hunt_id);
+        Storage::set_pool_total_migrated_out(
+            &env,
+            source_hunt_id,
+            prev_migrated_out + amount,
+        );
+
         // The source's sponsors no longer have a claim there — their share of
         // the balance just moved to the destination pool under the creator's
         // name below. Clearing this now prevents a future refund_pool on the
@@ -1656,11 +1680,13 @@ impl RewardManager {
         let balance = Storage::get_pool_balance(&env, hunt_id);
         let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id);
         let total_distributed = Storage::get_pool_total_distributed(&env, hunt_id);
+        let total_migrated_out = Storage::get_pool_total_migrated_out(&env, hunt_id);
 
         Some(RewardPoolStatus {
             balance,
             total_deposited,
             total_distributed,
+            total_migrated_out,
             creator: config.creator,
             min_distribution_amount: config.min_distribution_amount,
             frozen: config.frozen,
