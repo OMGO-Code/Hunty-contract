@@ -3592,6 +3592,91 @@ mod test {
         });
     }
 
+    /// After `migrate_pool` the accounting identity must hold for **both** pools:
+    ///   source:  total_deposited == balance + total_distributed + total_refunded + total_migrated_out
+    ///   dest:    total_deposited == balance + total_distributed + total_refunded + total_migrated_out
+    ///
+    /// Before this fix the source pool showed `total_deposited = 60_000_000` but
+    /// `balance = 0` with nothing to account for the difference, so the identity
+    /// was broken and `total_migrated_out` was zero when it should equal the
+    /// migrated amount.
+    #[test]
+    fn test_migrate_pool_accounting_identity() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
+        let hunty_core_id = setup_hunty_core(&env, 1, true);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
+
+            // Create source (hunt 1) and destination (hunt 2), fund source.
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                creator.clone(),
+                1,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0u32,
+                true,
+            )
+            .unwrap();
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                creator.clone(),
+                2,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0u32,
+                true,
+            )
+            .unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
+
+            Storage::set_hunty_core(&env, &hunty_core_id);
+
+            let migrated = RewardManager::migrate_pool(env.clone(), creator.clone(), 1, 2).unwrap();
+            assert_eq!(migrated, 60_000_000);
+
+            // --- Source pool accounting identity ---
+            let src = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            // balance was zeroed
+            assert_eq!(src.balance, 0);
+            // total_migrated_out must equal the migrated amount
+            assert_eq!(src.total_migrated_out, 60_000_000);
+            // identity: total_deposited == balance + total_distributed + total_refunded + total_migrated_out
+            assert_eq!(
+                src.total_deposited,
+                src.balance + src.total_distributed + Storage::get_pool_total_refunded(&env, 1) + src.total_migrated_out,
+                "source pool accounting identity broken"
+            );
+
+            // --- Destination pool accounting identity ---
+            let dst = RewardManager::get_reward_pool(env.clone(), 2).unwrap();
+            assert_eq!(dst.balance, 60_000_000);
+            assert_eq!(dst.total_deposited, 60_000_000);
+            assert_eq!(dst.total_migrated_out, 0); // destination gains funds, not loses them
+            // identity: total_deposited == balance + total_distributed + total_refunded + total_migrated_out
+            assert_eq!(
+                dst.total_deposited,
+                dst.balance + dst.total_distributed + Storage::get_pool_total_refunded(&env, 2) + dst.total_migrated_out,
+                "destination pool accounting identity broken"
+            );
+        });
+    }
+
     #[test]
     fn test_migrate_pool_rejects_different_tokens() {
         let env = Env::default();
