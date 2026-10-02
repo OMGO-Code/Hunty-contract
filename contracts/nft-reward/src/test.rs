@@ -1697,15 +1697,18 @@ fn test_search_nfts_no_matches() {
 }
 
 #[test]
-fn test_search_nfts_pagination_beyond_max_scan_limit() {
+fn test_search_nfts_pagination_walks_whole_collection() {
     let env = setup_env();
     let (client, minter) = setup_nft_reward(&env, None);
 
     let player = Address::generate(&env);
 
-    // Mint more NFTs than MAX_SCAN_LIMIT so the scan must be bounded and
-    // paginated via offset/limit rather than loading the whole collection.
-    let total: u64 = 120;
+    // Mint enough NFTs that the collection cannot be returned in one page, so
+    // the scan has to be bounded and paginated via offset/limit rather than
+    // loading the whole collection. The count stays well below MAX_SCAN_LIMIT
+    // (200) because every mint lands in the generated test snapshot, and a
+    // collection that large would blow the 1 MiB tracked-file limit.
+    let total: u64 = 40;
     for i in 0..total {
         let metadata = create_metadata(&env, &format!("NFT {}", i), "desc", "https://test");
         client.mint_reward_nft(&minter, &i, &player, &metadata);
