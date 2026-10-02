@@ -4,6 +4,9 @@ PYTHON ?= python3
 SHA256 ?= sha256sum
 DOCS_OUTPUT := docs/contract-api.md
 
+# The binding-stamping recipe uses bash substring expansion.
+SHELL := /bin/bash
+
 .PHONY: build bindings all clean generate-api-docs check check-wasm-abi setup-githooks
 .PHONY: build bindings all clean generate-api-docs check setup-githooks benchmark-compare
 # macOS compatibility: check for shasum (pre-installed on macOS) and fall back to sha256sum.
@@ -16,7 +19,7 @@ endif
 all: build bindings
 
 build: generate-api-docs
-	cargo build --workspace --target wasm32v1-none --release
+	stellar contract build --locked
 
 generate-api-docs:
 	$(PYTHON) scripts/generate_api_docs.py --output $(DOCS_OUTPUT)

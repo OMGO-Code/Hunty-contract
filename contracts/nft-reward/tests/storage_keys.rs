@@ -35,7 +35,9 @@ fn sample_metadata(env: &Env, title: &str) -> NftMetadata {
     NftMetadata {
         title: String::from_str(env, title),
         description: String::from_str(env, "desc"),
-        image_uri: String::from_str(env, "ipfs://test"),
+        // image_uri_is_valid requires an ipfs:// value to carry a v0 CID of
+        // at least 46 base58 characters.
+        image_uri: String::from_str(env, "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"),
         hunt_title: String::from_str(env, title),
         rarity: 0,
         tier: 0,
