@@ -69,7 +69,7 @@ fn setup_funded_hunt(env: &Env, core_id: &Address, status_source: &Address) -> F
     let creator = Address::generate(env);
 
     let client = HuntyCoreClient::new(env, core_id);
-    client.initialize_admin(&admin).unwrap();
+    client.initialize_admin(&admin);
 
     let token_admin = Address::generate(env);
     let token_address = env
@@ -80,34 +80,28 @@ fn setup_funded_hunt(env: &Env, core_id: &Address, status_source: &Address) -> F
         (admin.clone(), token_address.clone(), status_source.clone()),
     );
 
-    let hunt_id = client
-        .create_hunt(
-            &creator,
-            &text(env, "Funded Hunt"),
-            &text(env, "Cancel must refund the pool"),
-            &None,
-            &None,
-            &0,
-            &None,
-            &None,
-        )
-        .unwrap();
+    let hunt_id = client.create_hunt(
+        &creator,
+        &text(env, "Funded Hunt"),
+        &text(env, "Cancel must refund the pool"),
+        &None,
+        &None,
+        &0,
+        &None,
+        &None,
+    );
     // An Active hunt needs at least one required clue.
-    client
-        .add_clue(
-            &hunt_id,
-            &text(env, "Question"),
-            &text(env, "answer"),
-            &10,
-            &true,
-            &None,
-            &None,
-        )
-        .unwrap();
-    client.activate_hunt(&hunt_id, &creator).unwrap();
-    client
-        .set_reward_manager(&admin, &reward_manager_id)
-        .unwrap();
+    client.add_clue(
+        &hunt_id,
+        &text(env, "Question"),
+        &text(env, "answer"),
+        &10,
+        &true,
+        &None,
+        &None,
+    );
+    client.activate_hunt(&hunt_id, &creator);
+    client.set_reward_manager(&admin, &reward_manager_id);
 
     let sac = token::StellarAssetClient::new(env, &token_address);
     sac.mint(&creator, &POOL_FUNDING);
@@ -163,15 +157,13 @@ fn cancel_hunt_refunds_a_funded_pool() {
         );
     });
 
-    client
-        .cancel_hunt(&fixture.hunt_id, &fixture.creator)
-        .expect("cancelling a funded hunt must refund its pool, not fail with RefundFailed");
+    client.cancel_hunt(&fixture.hunt_id, &fixture.creator);
 
     // HuntyCore must have reported the hunt as terminal *while* it asked for
     // the refund, and persisted that status.
-    let hunt = client.get_hunt_info(&fixture.hunt_id).unwrap();
+    let hunt = client.get_hunt_info(&fixture.hunt_id);
     assert_eq!(hunt.status, HuntStatus::Cancelled);
-    assert!(client.is_hunt_terminal(&fixture.hunt_id).unwrap());
+    assert!(client.is_hunt_terminal(&fixture.hunt_id));
 
     // The pool is drained and the funder made whole.
     env.as_contract(&fixture.reward_manager_id, || {
@@ -212,9 +204,9 @@ fn cancel_hunt_rolls_back_when_the_refund_is_rejected() {
 
     // `Cancelled` is written before the cross-contract call, so this proves the
     // failed refund rolls that write back instead of stranding the hunt.
-    let hunt = client.get_hunt_info(&fixture.hunt_id).unwrap();
+    let hunt = client.get_hunt_info(&fixture.hunt_id);
     assert_eq!(hunt.status, HuntStatus::Active);
-    assert!(!client.is_hunt_terminal(&fixture.hunt_id).unwrap());
+    assert!(!client.is_hunt_terminal(&fixture.hunt_id));
 
     env.as_contract(&fixture.reward_manager_id, || {
         assert_eq!(

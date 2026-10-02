@@ -265,7 +265,7 @@ fn test_distribute_rewards_uses_pool_token() {
         };
 
         let result =
-            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), reward_config);
+            RewardManager::distribute_rewards_impl(env.clone(), 1, player.clone(), reward_config);
 
         assert!(result.is_ok());
 
@@ -671,7 +671,8 @@ fn test_admin_withdraw_unclaimed_uses_pool_token() {
             nft_tier: 0,
             completion_rank: 0,
         };
-        RewardManager::distribute_rewards(env.clone(), 1, player.clone(), reward_config).unwrap();
+        RewardManager::distribute_rewards_impl(env.clone(), 1, player.clone(), reward_config)
+            .unwrap();
 
         // Admin withdraws 20M of the remaining 70M
         let result = RewardManager::admin_withdraw_unclaimed(
