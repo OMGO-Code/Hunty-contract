@@ -112,6 +112,8 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `COLLECTION_METADATA_KEY` | `COLL` | collection metadata |
 | `HAS_AUTH_KEY` | `HAUTH` | auth-initialized flag |
 | `ALL_NFTS_KEY` | `ALLNFT` | vector of all minted NFT ids |
+| `ALL_NFT_COUNT_KEY` | `ANFTC` | count of NFTs in the global `ALLNFT` index |
+| `LIVE_SUPPLY_KEY` | `LIVES` | burn-adjusted live supply counter |
 | `TOTAL_HUNTS_KEY` | `TH` | distinct hunts that minted |
 | `TOTAL_OWNERS_KEY` | `TO` | distinct owners counter |
 | `CONTRACT_VERSION_KEY` | `CTRV` | contract version (instance storage) |

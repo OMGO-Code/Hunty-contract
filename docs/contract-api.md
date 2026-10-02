@@ -6198,15 +6198,14 @@ _No contract API functions found._
 
 ### `NftReward`
 
-#### `__constructor`
+#### `initialize`
 
-Constructor - runs atomically during deployment.
-Prevents front-running by initializing during deploy transaction.
+Initializes the NFT reward contract with an admin, minter, and optional max supply cap.
 
 **Signature:**
 
 ```rust
-pub fn __constructor(env: Env, admin: Address, minter: Address, max_supply: Option<u64>, metadata: CollectionMetadata) -> ()
+pub fn initialize(env: Env, admin: Address, minter: Address, max_supply: Option<u64>, collection_metadata: CollectionMetadata) -> Result<(), crate::errors::NftErrorCode>
 ```
 
 **Parameters:**
@@ -6215,29 +6214,9 @@ pub fn __constructor(env: Env, admin: Address, minter: Address, max_supply: Opti
 - `admin: Address`
 - `minter: Address`
 - `max_supply: Option<u64>`
-- `metadata: CollectionMetadata`
+- `collection_metadata: CollectionMetadata`
 
-**Returns:** `()`
-
----
-
-#### `initialize`
-
-**Signature:**
-
-```rust
-pub fn initialize(_env: Env, _admin: Address, _minter: Address, _max_supply: Option<u64>, _metadata: CollectionMetadata) -> Result<(), NftErrorCode>
-```
-
-**Parameters:**
-
-- `_env: Env`
-- `_admin: Address`
-- `_minter: Address`
-- `_max_supply: Option<u64>`
-- `_metadata: CollectionMetadata`
-
-**Returns:** `Result<(), NftErrorCode>`
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
 
 **Error type:** `NftErrorCode`
 
@@ -6264,192 +6243,90 @@ pub fn initialize(_env: Env, _admin: Address, _minter: Address, _max_supply: Opt
 - `InvalidMaxSupply` = 19
 - `InvalidRoyalty` = 20
 - `InvalidImageUri` = 21
-
----
-
-#### `initialize_admin`
-
-**Signature:**
-
-```rust
-pub fn initialize_admin(_env: Env, _admin: Address) -> Result<(), NftErrorCode>
-```
-
-**Parameters:**
-
-- `_env: Env`
-- `_admin: Address`
-
-**Returns:** `Result<(), NftErrorCode>`
-
-**Error type:** `NftErrorCode`
-
-**Error codes:**
-
-- `NftNotFound` = 1
-- `Unauthorized` = 2
-- `NotOwner` = 3
-- `InvalidRecipient` = 4
-- `SoulboundNft` = 5
-- `InvalidRarity` = 6
-- `AlreadyInitialized` = 7
-- `MaxSupplyReached` = 8
-- `NotInitialized` = 9
-- `NotOperator` = 10
-- `NftNotTransferable` = 11
-- `NftLocked` = 12
-- `InvalidMetadata` = 13
-- `MetadataFrozen` = 14
-- `TooManyExtensions` = 15
-- `InvalidExtensionKey` = 16
-- `InvalidExtensionValue` = 17
-- `ExtensionNotFound` = 18
-- `InvalidMaxSupply` = 19
-- `InvalidRoyalty` = 20
-- `InvalidImageUri` = 21
-
----
-
-#### `set_reward_manager`
-
-**Signature:**
-
-```rust
-pub fn set_reward_manager(_env: Env, _admin: Address, _reward_manager: Address) -> Result<(), NftErrorCode>
-```
-
-**Parameters:**
-
-- `_env: Env`
-- `_admin: Address`
-- `_reward_manager: Address`
-
-**Returns:** `Result<(), NftErrorCode>`
-
-**Error type:** `NftErrorCode`
-
-**Error codes:**
-
-- `NftNotFound` = 1
-- `Unauthorized` = 2
-- `NotOwner` = 3
-- `InvalidRecipient` = 4
-- `SoulboundNft` = 5
-- `InvalidRarity` = 6
-- `AlreadyInitialized` = 7
-- `MaxSupplyReached` = 8
-- `NotInitialized` = 9
-- `NotOperator` = 10
-- `NftNotTransferable` = 11
-- `NftLocked` = 12
-- `InvalidMetadata` = 13
-- `MetadataFrozen` = 14
-- `TooManyExtensions` = 15
-- `InvalidExtensionKey` = 16
-- `InvalidExtensionValue` = 17
-- `ExtensionNotFound` = 18
-- `InvalidMaxSupply` = 19
-- `InvalidRoyalty` = 20
-- `InvalidImageUri` = 21
-
----
-
-#### `get_total_supply`
-
-**Signature:**
-
-```rust
-pub fn get_total_supply(_env: Env) -> u64
-```
-
-**Parameters:**
-
-- `_env: Env`
-
-**Returns:** `u64`
-
----
-
-#### `get_nft_metadata`
-
-**Signature:**
-
-```rust
-pub fn get_nft_metadata(_env: Env, _nft_id: u64) -> Option<NftMetadata>
-```
-
-**Parameters:**
-
-- `_env: Env`
-- `_nft_id: u64`
-
-**Returns:** `Option<NftMetadata>`
 
 ---
 
 #### `mint_reward_nft`
 
+Mints a unique NFT as a reward for hunt completion.
+
+`minter` must be an authorized minter (and must sign the transaction) when the
+contract has been initialized. Before initialization the check is skipped so
+that existing deployments remain functional.
+
+Reward NFTs minted through this entrypoint are **soulbound** (non-transferable)
+by default, matching `mint_reward_nft_from_map`'s default, so an authorized
+minter gets the same behaviour from either path. Callers that want a
+transferable reward or a completion rank should use `mint_reward_nft_from_map`
+with the "transferable" / "completion_rank" keys set.
+
+# Arguments
+* `minter` - Address performing the mint (must be whitelisted after init)
+* `hunt_id` - The hunt this NFT commemorates
+* `player_address` - The address of the player completing the hunt (initial owner)
+* `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
+
+# Returns
+The unique NFT ID of the minted NFT
+
 **Signature:**
 
 ```rust
-pub fn mint_reward_nft(_env: Env, _minter: Address, _hunt_id: u64, _owner: Address, metadata: NftMetadata) -> Result<u64, NftErrorCode>
+pub fn mint_reward_nft(env: Env, minter: Address, hunt_id: u64, player_address: Address, metadata: NftMetadata) -> u64
 ```
 
 **Parameters:**
 
-- `_env: Env`
-- `_minter: Address`
-- `_hunt_id: u64`
-- `_owner: Address`
+- `env: Env`
+- `minter: Address`
+- `hunt_id: u64`
+- `player_address: Address`
 - `metadata: NftMetadata`
 
-**Returns:** `Result<u64, NftErrorCode>`
-
-**Error type:** `NftErrorCode`
-
-**Error codes:**
-
-- `NftNotFound` = 1
-- `Unauthorized` = 2
-- `NotOwner` = 3
-- `InvalidRecipient` = 4
-- `SoulboundNft` = 5
-- `InvalidRarity` = 6
-- `AlreadyInitialized` = 7
-- `MaxSupplyReached` = 8
-- `NotInitialized` = 9
-- `NotOperator` = 10
-- `NftNotTransferable` = 11
-- `NftLocked` = 12
-- `InvalidMetadata` = 13
-- `MetadataFrozen` = 14
-- `TooManyExtensions` = 15
-- `InvalidExtensionKey` = 16
-- `InvalidExtensionValue` = 17
-- `ExtensionNotFound` = 18
-- `InvalidMaxSupply` = 19
-- `InvalidRoyalty` = 20
-- `InvalidImageUri` = 21
+**Returns:** `u64`
 
 ---
 
 #### `mint_reward_nft_from_map`
 
+Mints a reward NFT from a generic metadata map. This is the entrypoint
+used by cross-contract callers (e.g. RewardManager) that cannot depend
+on this crate's `NftMetadata` type directly.
+
+`minter` is the calling contract's address and must be whitelisted when the
+contract has been initialized.
+
+Expected keys in `metadata` (all optional, with sensible defaults):
+- "title": String
+- "description": String
+- "image_uri": String
+- "hunt_title": String (defaults to title when omitted/empty)
+- "rarity": u32
+- "tier": u32
+- "creator": Address (defaults to player_address if omitted)
+- "royalty_bps": u32 (optional, basis points for royalty percentage)
+- "transferable": bool
+- "extensions": Map<String, String> (optional, arbitrary key-value metadata)
+
+# Errors
+Returns `NftErrorCode::InvalidMetadata` when a key is **present** but holds
+a value of the wrong type. An **absent** key silently takes its documented default.
+
 **Signature:**
 
 ```rust
-pub fn mint_reward_nft_from_map(_env: Env, _minter: Address, _hunt_id: u64, _owner: Address, values: Map<Symbol, soroban_sdk::Val>) -> Result<u64, NftErrorCode>
+pub fn mint_reward_nft_from_map(env: Env, minter: Address, hunt_id: u64, player_address: Address, metadata: Map<Symbol, Val>) -> Result<u64, crate::errors::NftErrorCode>
 ```
 
 **Parameters:**
 
-- `_env: Env`
-- `_minter: Address`
-- `_hunt_id: u64`
-- `_owner: Address`
-- `values: Map<Symbol, soroban_sdk::Val>`
+- `env: Env`
+- `minter: Address`
+- `hunt_id: u64`
+- `player_address: Address`
+- `metadata: Map<Symbol, Val>`
 
-**Returns:** `Result<u64, NftErrorCode>`
+**Returns:** `Result<u64, crate::errors::NftErrorCode>`
 
 **Error type:** `NftErrorCode`
 
@@ -6479,39 +6356,1223 @@ pub fn mint_reward_nft_from_map(_env: Env, _minter: Address, _hunt_id: u64, _own
 
 ---
 
-#### `get_player_nfts`
+#### `get_nft`
+
+Retrieves NFT data by ID.
 
 **Signature:**
 
 ```rust
-pub fn get_player_nfts(_env: Env, _player: Address, _offset: u32, _limit: u32) -> Vec<u64>
+pub fn get_nft(env: Env, nft_id: u64) -> Option<NftData>
 ```
 
 **Parameters:**
 
-- `_env: Env`
-- `_player: Address`
-- `_offset: u32`
-- `_limit: u32`
+- `env: Env`
+- `nft_id: u64`
+
+**Returns:** `Option<NftData>`
+
+---
+
+#### `get_collection_metadata`
+
+Returns the collection-level metadata configured at initialization.
+
+**Signature:**
+
+```rust
+pub fn get_collection_metadata(env: Env) -> Option<CollectionMetadata>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<CollectionMetadata>`
+
+---
+
+#### `get_nft_metadata`
+
+Returns complete metadata for an NFT, including hunt info and completion details.
+
+**Signature:**
+
+```rust
+pub fn get_nft_metadata(env: Env, nft_id: u64) -> Option<NftMetadataResponse>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+
+**Returns:** `Option<NftMetadataResponse>`
+
+---
+
+#### `set_nft_extension`
+
+Sets an extension field on an NFT. Only the NFT owner can call this.
+Max 10 extension fields per NFT. If the key already exists, it is updated.
+If the maximum is reached and the key is new, it returns an error.
+
+# Arguments
+* `nft_id` - The NFT to extend
+* `owner` - The current owner (must authorize)
+* `key` - The extension key (max 64 bytes)
+* `value` - The extension value (max 512 bytes)
+
+**Signature:**
+
+```rust
+pub fn set_nft_extension(env: Env, nft_id: u64, owner: Address, key: String, value: String) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `owner: Address`
+- `key: String`
+- `value: String`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `get_nft_extension`
+
+Gets the value of a specific extension field for an NFT.
+
+# Arguments
+* `nft_id` - The NFT to query
+* `key` - The extension key to look up
+
+# Returns
+The extension value if found, None otherwise.
+
+**Signature:**
+
+```rust
+pub fn get_nft_extension(env: Env, nft_id: u64, key: String) -> Option<String>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `key: String`
+
+**Returns:** `Option<String>`
+
+---
+
+#### `get_nft_extensions`
+
+Gets all extension fields for an NFT.
+
+# Arguments
+* `nft_id` - The NFT to query
+
+# Returns
+Map of all extension key-value pairs.
+
+**Signature:**
+
+```rust
+pub fn get_nft_extensions(env: Env, nft_id: u64) -> Option<Map<String, String>>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+
+**Returns:** `Option<Map<String, String>>`
+
+---
+
+#### `remove_nft_extension`
+
+Removes an extension field from an NFT. Only the NFT owner can call this.
+
+# Arguments
+* `nft_id` - The NFT to modify
+* `owner` - The current owner (must authorize)
+* `key` - The extension key to remove
+
+**Signature:**
+
+```rust
+pub fn remove_nft_extension(env: Env, nft_id: u64, owner: Address, key: String) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `owner: Address`
+- `key: String`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `get_admin`
+
+Returns the configured admin address, if set.
+
+**Signature:**
+
+```rust
+pub fn get_admin(env: Env) -> Option<Address>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<Address>`
+
+---
+
+#### `set_reward_manager`
+
+Sets the RewardManager contract address. Only the admin can call this.
+
+**Signature:**
+
+```rust
+pub fn set_reward_manager(env: Env, admin: Address, reward_manager: Address) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `reward_manager: Address`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `add_authorized_contract`
+
+Adds a contract to the authorized callers list. Only the admin can call this.
+
+**Signature:**
+
+```rust
+pub fn add_authorized_contract(env: Env, admin: Address, contract: Address) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `contract: Address`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `remove_authorized_contract`
+
+Removes a contract from the authorized callers list. Only the admin can call this.
+
+**Signature:**
+
+```rust
+pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `contract: Address`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `admin_update_image_uris`
+
+Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
+replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
+
+Paginated like every other collection scan in this contract
+(`list_all_nfts`, `get_player_nfts`, `get_nfts_by_hunt`): a single call
+only ever touches up to `MAX_SCAN_LIMIT` NFTs starting at `offset`, so
+it can't exceed the invocation resource budget regardless of
+collection size. Drive a full migration by repeatedly calling this
+with `offset` set to the previous call's `next_offset` until
+`next_offset` stops advancing (or equals the collection size).
+
+The operation is idempotent: re-running a batch over an
+already-migrated range updates nothing (those URIs already start with
+`new_prefix`, not `old_prefix`), so a retried or overlapping batch is
+harmless.
+
+# Authorization
+Only the configured admin can call this function.
+
+# Arguments
+* `admin` - The admin address (must match the stored admin)
+* `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
+* `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+* `offset` - The starting index for this batch (0-based)
+* `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
+
+# Returns
+`(updated_count, next_offset)` — how many image URIs were updated in
+this batch, and the offset to resume from for the next one.
+
+**Signature:**
+
+```rust
+pub fn admin_update_image_uris(env: Env, admin: Address, old_prefix: String, new_prefix: String, offset: u32, limit: u32) -> Result<(u32, u32), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `old_prefix: String`
+- `new_prefix: String`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `Result<(u32, u32), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `update_nft_metadata`
+
+Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.
+
+Returns `None` — meaning "leave the URI untouched" — whenever the
+operation cannot be performed *exactly*:
+- `uri` does not start with `old_prefix`, or
+- any of `uri` / `old_prefix` / `new_prefix` exceeds `MAX_NFT_URI_BYTES`
+(all three are bounded by that constant elsewhere in the contract;
+this defends against callers that bypass those checks), or
+- the resulting URI would exceed `MAX_NFT_URI_BYTES`.
+
+Every early return above is an explicit, checked rejection. Unlike the
+previous implementation, nothing here is silently truncated (the old
+code copied at most 256 bytes into a fixed buffer but kept comparing
+against the untruncated length) and nothing can index out of bounds
+(the old code panicked when `old_prefix` exceeded 256 bytes, or when
+`new_prefix` was long enough to overflow the 512-byte output buffer).
+Updates mutable metadata fields (description, image_uri). Owner only.
+Title, hunt info, and attributes remain immutable for collectibility.
+
+**Signature:**
+
+```rust
+pub fn update_nft_metadata(env: Env, nft_id: u64, updater: Address, new_description: String, new_image_uri: String) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `updater: Address`
+- `new_description: String`
+- `new_image_uri: String`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `total_supply`
+
+Returns the number of NFTs that currently exist — i.e. minted so far
+minus burned. This decreases when an NFT is burned.
+
+This is distinct from the `max_supply` cap (see `get_max_supply`),
+which limits the *lifetime* mint count and is unaffected by burns:
+a burned NFT's ID is never reused and never reopens room under the
+cap for an additional mint.
+
+**Signature:**
+
+```rust
+pub fn total_supply(env: Env) -> u64
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u64`
+
+---
+
+#### `get_max_supply`
+
+Returns the configured maximum total supply of NFTs.
+
+- `None`  → no cap was set (unlimited minting)
+- `Some(n)` → at most `n` NFTs may ever be minted, lifetime. This caps
+the ever-minted count (see `total_supply` for the currently-live
+count), so burning an NFT does not free up room under the cap.
+
+**Signature:**
+
+```rust
+pub fn get_max_supply(env: Env) -> Option<u64>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<u64>`
+
+---
+
+#### `set_max_supply`
+
+Updates the maximum total supply cap. Admin only.
+
+- Pass `None` to remove the cap (unlimited).
+- Pass `Some(n)` where `n > 0` and `n >= current total_supply` to set a new cap.
+Attempting to set a cap of 0 or lower than the already-minted count is
+rejected with `InvalidMaxSupply` to prevent bricking the contract.
+
+# Errors
+* `NotInitialized` - Contract has not been initialized yet
+* `Unauthorized`   - Caller is not the admin
+* `InvalidMaxSupply` - Attempting to set cap to Some(0) or below already-minted supply
+
+**Signature:**
+
+```rust
+pub fn set_max_supply(env: Env, admin: Address, new_max: Option<u64>) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `new_max: Option<u64>`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `get_remaining_supply`
+
+Returns the number of NFTs that can still be minted.
+
+- `None`  → unlimited (no cap configured)
+- `Some(n)` → exactly `n` more NFTs may be minted before the cap is hit
+
+Once the cap is reached this returns `Some(0)`, and any subsequent mint
+will panic with `MaxSupplyReached`.
+
+**Signature:**
+
+```rust
+pub fn get_remaining_supply(env: Env) -> Option<u64>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<u64>`
+
+---
+
+#### `list_all_nfts`
+
+Lists all NFTs minted by the contract with pagination support.
+
+Returns a vector of NftData structs, paginated by offset and limit.
+The limit is bounded to MAX_SCAN_LIMIT (200) to prevent excessive gas consumption.
+
+# Arguments
+* `env` - The Soroban environment
+* `offset` - The starting index for pagination (0-based)
+* `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+
+# Returns
+Vec<NftData> - A vector of NFT data structures, bounded by limit or remaining NFTs
+
+**Signature:**
+
+```rust
+pub fn list_all_nfts(env: Env, offset: u32, limit: u32) -> Vec<NftData>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `Vec<NftData>`
+
+---
+
+#### `search_nfts_by_metadata`
+
+Searches NFTs by metadata fields with pagination support.
+
+Allows filtering NFTs by various metadata fields. All filter parameters are optional -
+only provided filters are applied. Returns matching NFTs with pagination.
+
+# Arguments
+* `env` - The Soroban environment
+* `offset` - The starting index for pagination (0-based)
+* `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+* `title_filter` - Optional filter for NFT title (exact match)
+* `hunt_title_filter` - Optional filter for hunt title (exact match)
+* `rarity_filter` - Optional filter for rarity tier (0-5)
+* `tier_filter` - Optional filter for custom tier
+* `creator_filter` - Optional filter for creator address
+* `hunt_id_filter` - Optional filter for hunt ID
+* `extension_key` - Optional extension key to search for
+* `extension_value` - Optional extension value to match (requires extension_key)
+
+# Returns
+Vec<NftData> - A vector of matching NFT data structures, paginated by offset and limit
+
+**Signature:**
+
+```rust
+pub fn search_nfts_by_metadata(env: Env, offset: u32, limit: u32, title_filter: Option<String>, hunt_title_filter: Option<String>, rarity_filter: Option<u32>, tier_filter: Option<u32>, creator_filter: Option<Address>, hunt_id_filter: Option<u64>, extension_key: Option<String>, extension_value: Option<String>) -> Vec<NftData>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+- `title_filter: Option<String>`
+- `hunt_title_filter: Option<String>`
+- `rarity_filter: Option<u32>`
+- `tier_filter: Option<u32>`
+- `creator_filter: Option<Address>`
+- `hunt_id_filter: Option<u64>`
+- `extension_key: Option<String>`
+- `extension_value: Option<String>`
+
+**Returns:** `Vec<NftData>`
+
+---
+
+#### `transfer_nft`
+
+Transfers an NFT to a new owner when the NFT is transferable.
+Non-transferable (soulbound) NFTs remain bound to the minting recipient.
+
+**Signature:**
+
+```rust
+pub fn transfer_nft(env: Env, nft_id: u64, from_address: Address, to_address: Address, caller: Address) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `from_address: Address`
+- `to_address: Address`
+- `caller: Address`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `owner_of`
+
+Returns the owner of an NFT.
+
+**Signature:**
+
+```rust
+pub fn owner_of(env: Env, nft_id: u64) -> Option<Address>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+
+**Returns:** `Option<Address>`
+
+---
+
+#### `verify_ownership`
+
+Verifies whether `address` is the current owner of `nft_id`.
+Returns `true` when the NFT exists and the stored owner equals `address`.
+
+**Signature:**
+
+```rust
+pub fn verify_ownership(env: Env, address: Address, nft_id: u64) -> bool
+```
+
+**Parameters:**
+
+- `env: Env`
+- `address: Address`
+- `nft_id: u64`
+
+**Returns:** `bool`
+
+---
+
+#### `has_hunt_nft`
+
+Returns `true` if `address` owns any NFT minted for `hunt_id`.
+Performs an O(1) indexed lookup via the stored (owner, hunt_id) count mapping.
+
+**Signature:**
+
+```rust
+pub fn has_hunt_nft(env: Env, address: Address, hunt_id: u64) -> bool
+```
+
+**Parameters:**
+
+- `env: Env`
+- `address: Address`
+- `hunt_id: u64`
+
+**Returns:** `bool`
+
+---
+
+#### `get_player_nfts`
+
+Returns paginated NFT IDs owned by an address.
+The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
+
+**Signature:**
+
+```rust
+pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `offset: u32`
+- `limit: u32`
 
 **Returns:** `Vec<u64>`
 
 ---
 
-#### `get_nft`
+#### `get_nfts_by_hunt`
+
+Returns paginated NFT IDs minted for a hunt.
+The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
 
 **Signature:**
 
 ```rust
-pub fn get_nft(_env: Env, _nft_id: u64) -> Option<Nft>
+pub fn get_nfts_by_hunt(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u64>
 ```
 
 **Parameters:**
 
-- `_env: Env`
-- `_nft_id: u64`
+- `env: Env`
+- `hunt_id: u64`
+- `offset: u32`
+- `limit: u32`
 
-**Returns:** `Option<Nft>`
+**Returns:** `Vec<u64>`
+
+---
+
+#### `get_hunt_nft_count`
+
+Returns the total number of NFTs minted for a hunt.
+
+**Signature:**
+
+```rust
+pub fn get_hunt_nft_count(env: Env, hunt_id: u64) -> u32
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `u32`
+
+---
+
+#### `set_operator`
+
+Grants `operator` the ability to manage all NFTs owned by `owner`.
+
+# Authorization
+`owner` must authorize this call.
+
+**Signature:**
+
+```rust
+pub fn set_operator(env: Env, owner: Address, operator: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `()`
+
+---
+
+#### `remove_operator`
+
+Revokes operator approval for `operator` over `owner`'s NFTs.
+
+# Authorization
+`owner` must authorize this call.
+
+**Signature:**
+
+```rust
+pub fn remove_operator(env: Env, owner: Address, operator: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `()`
+
+---
+
+#### `is_operator`
+
+Returns true if `operator` is approved to manage all NFTs of `owner`.
+
+**Signature:**
+
+```rust
+pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `bool`
+
+---
+
+#### `burn_nft`
+
+Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
+
+# Authorization
+The `owner` must authorize this call and be the current owner of the NFT.
+
+# Locked vs. soulbound — deliberate, distinct policies
+- **Locked** (`nft.locked`) blocks burning outright: this flag exists for
+states like escrow, staking, or a dispute hold, where the NFT must
+not be destroyed out from under whatever holds the lock.
+- **Soulbound / non-transferable** (`!nft.transferable`) does *not*
+block burning. `transferable` only gates `transfer_nft` — moving an
+NFT to a different owner. Burning is destruction by its own owner,
+not a transfer, so a soulbound NFT can still be burned by the owner
+it's bound to. (If a given deployment wants soulbound NFTs to be
+permanent even against their own owner, that is a separate policy
+decision this function deliberately does not make — nothing here
+currently checks `transferable`.)
+
+# Errors
+Returns `NftNotFound` if the NFT does not exist.
+Returns `NotOwner` if the caller is not the current owner.
+Returns `NftLocked` if the NFT is locked (e.g., staked elsewhere).
+
+**Signature:**
+
+```rust
+pub fn burn_nft(env: Env, nft_id: u64, owner: Address) -> Result<(), crate::errors::NftErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `nft_id: u64`
+- `owner: Address`
+
+**Returns:** `Result<(), crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+- `InvalidImageUri` = 21
+
+---
+
+#### `get_schema_version`
+
+**Signature:**
+
+```rust
+pub fn get_schema_version(env: Env) -> u32
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u32`
+
+---
+
+#### `initialize_schema`
+
+**Signature:**
+
+```rust
+pub fn initialize_schema(env: Env, admin: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `()`
+
+---
+
+#### `propose_upgrade`
+
+**Signature:**
+
+```rust
+pub fn propose_upgrade(env: Env, admin: Address, target_version: u32) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+
+**Returns:** `Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `set_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn set_upgrade_timelock(env: Env, admin: Address, delay_seconds: u64) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `delay_seconds: u64`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `get_upgrade_proposal`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<hunty_migration::UpgradeProposal>`
+
+---
+
+#### `get_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_timelock(env: Env) -> u64
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u64`
+
+---
+
+#### `get_upgrade_history`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_history(env: Env, offset: u32, limit: u32) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>`
+
+---
+
+#### `run_migration`
+
+**Signature:**
+
+```rust
+pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: bool) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+- `dry_run: bool`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `rollback_migration`
+
+**Signature:**
+
+```rust
+pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
 
 ---
 
