@@ -1694,16 +1694,7 @@ fn test_search_nfts_pagination_beyond_max_scan_limit() {
     let mut iterations = 0;
     loop {
         let page = client.search_nfts_by_metadata(
-            &offset,
-            &page_size,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
-            &None,
+            &offset, &page_size, &None, &None, &None, &None, &None, &None, &None, &None,
         );
         assert!(
             page.len() <= page_size,
